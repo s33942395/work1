@@ -13,16 +13,17 @@ def load_phase_data(file_path):
         df.columns = df.columns.str.replace('\n', ' ', regex=False)
         return df
     except FileNotFoundError:
-        st.error(f"錯誤：找不到資料檔案 {file_path}")
+        st.error(f"錯誤：在應用程式的根目錄中找不到資料檔案 {file_path}。請確認您已將 CSV 檔案和 app 腳本一同上傳至 GitHub。")
         return None
 
 st.title("📊 問卷資料互動分析報告 (最終版)")
 st.markdown("請從下方的下拉選單中選擇一個問卷階段，以查看該階段所有問題的獨立分析結果。" )
 
+# Use relative paths for deployment
 phases = {
-    "第一階段": "/Users/liuchenbang/Desktop/工作/STANDARD_8RG8Y_未上市櫃公司治理問卷第一階段_202511050604_690ae8db08878.csv",
-    "第二階段": "/Users/liuchenbang/Desktop/工作/STANDARD_7RGxP_未上市櫃公司治理問卷第二階段_202511050605_690ae92a9a127.csv",
-    "第三階段": "/Users/liuchenbang/Desktop/工作/STANDARD_Yb9D2_未上市櫃公司治理問卷第三階段_202511050605_690ae9445a228.csv"
+    "第一階段": "STANDARD_8RG8Y_未上市櫃公司治理問卷第一階段_202511050604_690ae8db08878.csv",
+    "第二階段": "STANDARD_7RGxP_未上市櫃公司治理問卷第二階段_202511050605_690ae92a9a127.csv",
+    "第三階段": "STANDARD_Yb9D2_未上市櫃公司治理問卷第三階段_202511050605_690ae9445a228.csv"
 }
 
 selected_phase_name = st.selectbox("**請選擇要分析的問卷階段：**", list(phases.keys()))
@@ -48,6 +49,13 @@ if df is not None:
             st.markdown("---")
             continue
 
+        is_numeric = pd.api.types.is_numeric_dtype(col_data)
+        if not is_numeric:
+            numeric_version = pd.to_numeric(col_data, errors='coerce')
+            if (numeric_version.notna().sum() / len(col_data) > 0.7):
+                is_numeric = True
+                col_data = numeric_version.dropna()
+
         # Heuristic to detect multi-select questions
         is_multiselect = False
         if col_data.dtype == 'object':
@@ -69,32 +77,24 @@ if df is not None:
             fig.update_layout(xaxis_tickangle=0, template="plotly_white")
             st.plotly_chart(fig, use_container_width=True, key=f"multiselect_plot_{selected_phase_name}_{i}")
 
+        elif is_numeric:
+            st.markdown("##### 數值型資料統計摘要")
+            st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}"))
+            
+            st.markdown("##### 盒狀圖 (Box Plot)")
+            fig = go.Figure(data=[go.Box(y=col_data, name=col_name)])
+            fig.update_layout(xaxis_tickangle=0, template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True, key=f"num_plot_{selected_phase_name}_{i}")
+
         else:
-            is_numeric = pd.api.types.is_numeric_dtype(col_data)
-            if not is_numeric:
-                numeric_version = pd.to_numeric(col_data, errors='coerce')
-                if (numeric_version.notna().sum() / len(col_data) > 0.7):
-                    is_numeric = True
-                    col_data = numeric_version.dropna()
+            st.markdown("##### 類別型資料次數分佈")
+            stats_df = col_data.astype(str).value_counts().reset_index()
+            stats_df.columns = ['答案選項', '次數']
+            st.dataframe(stats_df)
 
-            if is_numeric:
-                st.markdown("##### 數值型資料統計摘要")
-                st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}"))
-                
-                st.markdown("##### 盒狀圖 (Box Plot)")
-                fig = go.Figure(data=[go.Box(y=col_data, name=col_name)])
-                fig.update_layout(xaxis_tickangle=0, template="plotly_white")
-                st.plotly_chart(fig, use_container_width=True, key=f"num_plot_{selected_phase_name}_{i}")
-
-            else:
-                st.markdown("##### 類別型資料次數分佈")
-                stats_df = col_data.astype(str).value_counts().reset_index()
-                stats_df.columns = ['答案選項', '次數']
-                st.dataframe(stats_df)
-
-                st.markdown("##### 垂直長條圖 (Vertical Bar Chart)")
-                fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])])
-                fig.update_layout(xaxis_tickangle=0, template="plotly_white")
-                st.plotly_chart(fig, use_container_width=True, key=f"cat_plot_{selected_phase_name}_{i}")
+            st.markdown("##### 垂直長條圖 (Vertical Bar Chart)")
+            fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])])
+            fig.update_layout(xaxis_tickangle=0, template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True, key=f"cat_plot_{selected_phase_name}_{i}")
 
         st.markdown("---")
