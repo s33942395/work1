@@ -1,4 +1,4 @@
-streamlit
-pandas
-plotly
-spipy
+streamlit==1.33.0
+pandas==2.2.1
+plotly==5.20.0
+scipy==1.13.0
