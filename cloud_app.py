@@ -17,8 +17,13 @@ def load_and_concat(file_paths):
             df.columns = df.columns.str.replace(r'【.*?】', '', regex=True).str.strip()
             df.columns = df.columns.str.replace('\n', ' ', regex=False)
 
-            # 如果 CSV 本身沒有階段欄位，嘗試從檔名推斷（第一階段 / 第二階段 / 第三階段）
-            if PHASE_COLUMN_NAME not in df.columns:
+            # 若 CSV 已有階段欄位，將像 "第一階段：..."、"第一階段／..." 等值正規化為 "第一階段"
+            if PHASE_COLUMN_NAME in df.columns:
+                extracted = df[PHASE_COLUMN_NAME].astype(str).str.extract(r'(第一階段|第二階段|第三階段)', expand=False)
+                # 若能抽出標準階段名稱，使用它；否則保留原值（避免破壞非預期格式）
+                df[PHASE_COLUMN_NAME] = extracted.where(extracted.notna(), df[PHASE_COLUMN_NAME])
+            else:
+                # 如果 CSV 本身沒有階段欄位，嘗試從檔名推斷（第一階段 / 第二階段 / 第三階段）
                 m = re.search(r'(第一階段|第二階段|第三階段)', os.path.basename(path))
                 if m:
                     df[PHASE_COLUMN_NAME] = m.group(1)
