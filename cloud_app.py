@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -44,6 +43,11 @@ analysis_mode = st.radio("**步驟一：請選擇分析模式**", ('逐題瀏覽
 df_to_analyze = pd.DataFrame()
 report_title = ""
 
+try:
+    df_new_multi = load_and_concat([COMPANY_NEW_MULTIPHASE_FILE])
+except Exception:
+    df_new_multi = pd.DataFrame()
+
 if analysis_mode == '逐題瀏覽':
     data_side = st.radio("**步驟二：請選擇要分析的對象**", ('公司方', '投資方'), horizontal=True, key='data_side_selector')
     phase_options = list(company_files.keys()) + ["不分階段 (全部合併)"]
@@ -55,7 +59,6 @@ if analysis_mode == '逐題瀏覽':
         if selected_phase in company_files: files_to_load.append(company_files[selected_phase])
         elif selected_phase == "不分階段 (全部合併)": files_to_load.extend(list(company_files.values()))
         if files_to_load: df_list.append(load_and_concat(files_to_load))
-        df_new_multi = load_and_concat([COMPANY_NEW_MULTIPHASE_FILE])
         if df_new_multi is not None and not df_new_multi.empty:
             if selected_phase in company_files: 
                 df_filtered = df_new_multi[df_new_multi[PHASE_COLUMN_NAME].str.contains(selected_phase, na=False)]
@@ -79,11 +82,9 @@ else: # Merged Analysis
     else: files_to_load = list(company_files.values()) + list(investor_files.values()) + [COMPANY_NEW_MULTIPHASE_FILE]
     df_base = load_and_concat(files_to_load)
     df_list = [df_base]
-    if phase_filter:
-        df_new_multi = load_and_concat([COMPANY_NEW_MULTIPHASE_FILE])
-        if df_new_multi is not None and not df_new_multi.empty:
-            df_filtered = df_new_multi[df_new_multi[PHASE_COLUMN_NAME].str.contains(phase_filter, na=False)]
-            df_list.append(df_filtered)
+    if phase_filter and df_new_multi is not None and not df_new_multi.empty:
+        df_filtered = df_new_multi[df_new_multi[PHASE_COLUMN_NAME].str.contains(phase_filter, na=False)]
+        df_list.append(df_filtered)
     if df_list: df_to_analyze = pd.concat(df_list, ignore_index=True, sort=False)
 
 # --- Display Analysis ---
@@ -97,24 +98,24 @@ if df_to_analyze is not None and not df_to_analyze.empty:
     analysis_cols = [col for col in df_to_analyze.columns if col not in cols_to_exclude and col in df_to_analyze.columns]
     analysis_cols = list(pd.Series(analysis_cols))
     for i, col_name in enumerate(analysis_cols):
-        with st.expander(f"題目：{col_name}", expanded=expand_all):
-            col_data = df_to_analyze[col_name].dropna()
-            if col_data.empty: continue
-            is_multiselect = False
-            if col_data.dtype == 'object':
-                non_empty_data = col_data[col_data.astype(str) != '']
-                if not non_empty_data.empty and non_empty_data.str.contains('\n').any(): is_multiselect = True
-            if is_multiselect:
-                st.markdown("##### 複選題選項次數分佈"); exploded_data = col_data.str.split('\n').explode().str.strip(); exploded_data = exploded_data[exploded_data != '']; stats_df = exploded_data.value_counts().reset_index(); stats_df.columns = ['獨立選項', '次數']; st.dataframe(stats_df)
-                st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['獨立選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
-            else:
-                is_numeric = pd.api.types.is_numeric_dtype(col_data)
-                if not is_numeric:
-                    numeric_version = pd.to_numeric(col_data, errors='coerce');
-                    if (numeric_version.notna().sum() / len(col_data) > 0.7): is_numeric = True; col_data = numeric_version.dropna()
-                if is_numeric:
-                    st.markdown("##### 數值型資料統計摘要"); st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}")); st.markdown("##### 盒狀圖"); fig = go.Figure(data=[go.Box(y=col_data, name=col_name)]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_num")
+        col_data = df_to_analyze[col_name].dropna()
+        if not col_data.empty:
+            with st.expander(f"題目：{col_name}", expanded=expand_all):
+                is_multiselect = False
+                if col_data.dtype == 'object':
+                    non_empty_data = col_data[col_data.astype(str) != '']
+                    if not non_empty_data.empty and non_empty_data.str.contains('\n').any(): is_multiselect = True
+                if is_multiselect:
+                    st.markdown("##### 複選題選項次數分佈"); exploded_data = col_data.str.split('\n').explode().str.strip(); exploded_data = exploded_data[exploded_data != '']; stats_df = exploded_data.value_counts().reset_index(); stats_df.columns = ['獨立選項', '次數']; st.dataframe(stats_df)
+                    st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['獨立選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
                 else:
-                    st.markdown("##### 類別型資料次數分佈"); stats_df = col_data.astype(str).value_counts().reset_index(); stats_df.columns = ['答案選項', '次數']; st.dataframe(stats_df)
-                    st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
+                    is_numeric = pd.api.types.is_numeric_dtype(col_data)
+                    if not is_numeric:
+                        numeric_version = pd.to_numeric(col_data, errors='coerce');
+                        if (numeric_version.notna().sum() / len(col_data) > 0.7): is_numeric = True; col_data = numeric_version.dropna()
+                    if is_numeric:
+                        st.markdown("##### 數值型資料統計摘要"); st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}")); st.markdown("##### 盒狀圖"); fig = go.Figure(data=[go.Box(y=col_data, name=col_name)]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_num")
+                    else:
+                        st.markdown("##### 類別型資料次數分佈"); stats_df = col_data.astype(str).value_counts().reset_index(); stats_df.columns = ['答案選項', '次數']; st.dataframe(stats_df)
+                        st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
 else: st.warning("在此選擇下沒有載入任何資料，請檢查您的選擇和檔案。")
