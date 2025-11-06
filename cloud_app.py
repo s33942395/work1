@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import warnings
 import os
 import re
+from scipy.stats import chi2_contingency, kruskal
 
 st.set_page_config(layout="wide", page_title="問卷互動分析報告")
 
@@ -38,7 +39,7 @@ def load_and_concat(file_paths):
     if not all_dfs: return pd.DataFrame()
     return pd.concat(all_dfs, ignore_index=True, sort=False)
 
-st.title("📊 問卷資料互動分析報告 (雲端版)")
+st.title("📊 問卷資料互動分析報告 ")
 st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。")
 
 # --- File Definitions (Relative Paths for Cloud) ---
@@ -179,3 +180,71 @@ if df_to_analyze is not None and not df_to_analyze.empty:
                             fig.update_layout(xaxis_tickangle=0, template="plotly_white")
                             st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
 else: st.warning("在此選擇下沒有載入任何資料，請檢查您的選擇和檔案。")
+
+def _cramers_v_from_table(table):
+    try:
+        chi2, p, dof, exp = chi2_contingency(table)
+        n = table.values.sum()
+        return np.sqrt(chi2 / (n * (min(table.shape) - 1))), p
+    except Exception as e:
+        return None, None
+
+def compute_and_display_categorical_stats(df, series):
+    # 類別跨階段：卡方 + Cramer's V
+    if PHASE_COLUMN_NAME in df.columns and df[PHASE_COLUMN_NAME].notna().any() and df[PHASE_COLUMN_NAME].nunique() > 1:
+        phases = df[PHASE_COLUMN_NAME].fillna('未標註階段')
+        table = pd.crosstab(series.astype(str), phases)
+        st.markdown("**跨階段統計（類別）**")
+        st.dataframe(table)
+        cramers, p = _cramers_v_from_table(table)
+        if p is not None:
+            st.write(f"卡方檢定 p-value = {p:.4f}；Cramer's V = {cramers:.3f}")
+        else:
+            st.write("無法計算卡方檢定。")
+    else:
+        st.write("未包含多個階段，未進行跨階段類別檢定。")
+
+def compute_and_display_numeric_stats(df, series):
+    # 數值跨階段：Kruskal-Wallis（非參數）
+    if PHASE_COLUMN_NAME in df.columns and df[PHASE_COLUMN_NAME].notna().any() and df[PHASE_COLUMN_NAME].nunique() > 1:
+        phases = df[PHASE_COLUMN_NAME].fillna('未標註階段')
+        groups = []
+        labels = []
+        for ph in phases.unique():
+            grp = series[phases == ph].dropna().astype(float)
+            if len(grp) > 0:
+                groups.append(grp)
+                labels.append(ph)
+        st.markdown("**跨階段統計（數值）**")
+        if len(groups) > 1:
+            try:
+                stat, p = kruskal(*groups)
+                summary = {lab: f"n={len(g)}, mean={g.mean():.3f}, median={g.median():.3f}" for lab,g in zip(labels, groups)}
+                st.write(summary)
+                st.write(f"Kruskal-Wallis stat={stat:.3f}, p-value={p:.4f}")
+            except Exception as e:
+                st.write("Kruskal-Wallis 檢定錯誤：", e)
+        else:
+            st.write("每個階段樣本不足，無法進行 Kruskal-Wallis 檢定。")
+    else:
+        st.write("未包含多個階段，未進行跨階段數值檢定。")
+
+def compute_and_display_multiselect_option_tests(df, original_series, option_list):
+    # 對每個複選選項做 presence/absence 的卡方檢定
+    if PHASE_COLUMN_NAME in df.columns and df[PHASE_COLUMN_NAME].notna().any() and df[PHASE_COLUMN_NAME].nunique() > 1:
+        st.markdown("**複選題選項跨階段統計（Presence/Absence 卡方）**")
+        phases = df[PHASE_COLUMN_NAME].fillna('未標註階段')
+        for opt in option_list:
+            # boolean series: 是否勾選該選項（避免 substring 問題，切割清理）
+            pres = original_series.astype(str).fillna('').apply(lambda s: opt in [x.strip() for x in s.split('\n') if x.strip()!=''])
+            table = pd.crosstab(pres, phases)
+            try:
+                chi2, p, dof, exp = chi2_contingency(table)
+                # compute phi/Cramer's V for 2xn: use same formula
+                n = table.values.sum()
+                cramers = np.sqrt(chi2 / (n * (min(table.shape) - 1))) if n and min(table.shape) > 1 else None
+                st.write(f"選項 '{opt}'：p-value={p:.4f}；Cramer's V={cramers:.3f}" if cramers is not None else f"選項 '{opt}'：p-value={p:.4f}")
+            except Exception as e:
+                st.write(f"選項 '{opt}' 無法計算卡方檢定：{e}")
+    else:
+        st.write("未包含多個階段，未進行複選題跨階段檢定。")
