@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import warnings
+import os
+import re
 
 st.set_page_config(layout="wide", page_title="問卷互動分析報告")
 
@@ -14,6 +16,16 @@ def load_and_concat(file_paths):
             df = pd.read_csv(path)
             df.columns = df.columns.str.replace(r'【.*?】', '', regex=True).str.strip()
             df.columns = df.columns.str.replace('\n', ' ', regex=False)
+
+            # 如果 CSV 本身沒有階段欄位，嘗試從檔名推斷（第一階段 / 第二階段 / 第三階段）
+            if PHASE_COLUMN_NAME not in df.columns:
+                m = re.search(r'(第一階段|第二階段|第三階段)', os.path.basename(path))
+                if m:
+                    df[PHASE_COLUMN_NAME] = m.group(1)
+
+            # 加入來源檔名以便追蹤來源
+            df['_source_file'] = os.path.basename(path)
+
             all_dfs.append(df)
         except FileNotFoundError:
             st.error(f"錯誤：找不到資料檔案 {path}。請確認所有 CSV 檔案都已和 app 腳本一同上傳至 GitHub。")
