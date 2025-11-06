@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,7 +27,7 @@ def load_data(file_paths):
 
 # --- App Header ---
 st.title("📊 問卷資料互動分析報告")
-st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。" )
+st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。")
 
 # --- File Definitions ---
 company_files = {
@@ -64,8 +65,15 @@ if analysis_mode == '分開比較':
     else:
         phases = investor_files
 
-    selected_phase_name = st.selectbox("**步驟三：請選擇問卷階段**", list(phases.keys()), key='phase_selector_separate')
-    files_to_load.append(phases[selected_phase_name])
+    # Add the new "No Phase" option
+    phase_options = list(phases.keys()) + ["不分階段 (全部合併)"]
+    selected_phase_name = st.selectbox("**步驟三：請選擇問卷階段**", phase_options, key='phase_selector_separate')
+
+    if selected_phase_name == "不分階段 (全部合併)":
+        files_to_load = list(phases.values())
+    else:
+        files_to_load.append(phases[selected_phase_name])
+    
     report_title = f"{data_side} - {selected_phase_name}"
 
 else: # Merged Analysis
@@ -92,11 +100,9 @@ st.header(f"您正在查看：{report_title}的分析結果")
 df = load_data(files_to_load)
 
 if df is not None:
-    # Display Sample Size
     st.metric(label="總樣本數 (問卷份數)", value=len(df))
     st.markdown("---")
 
-    # Expand/Collapse All Toggle
     expand_all = st.checkbox("一鍵展開/收合所有題目", value=False, key="expand_all_toggle")
     st.markdown("---")
 
@@ -111,10 +117,9 @@ if df is not None:
             col_data = df[col_name].dropna()
 
             if col_data.empty:
-                st.warning("此欄位無有效資料可供分析。" )
+                st.warning("此欄位無有效資料可供分析。")
                 continue
 
-            # Heuristic to detect multi-select questions
             is_multiselect = False
             if col_data.dtype == 'object':
                 non_empty_data = col_data[col_data.astype(str) != '']
