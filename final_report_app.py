@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,7 +12,6 @@ def load_and_concat(file_paths):
     for path in file_paths:
         try:
             df = pd.read_csv(path)
-            # Normalize column names by removing prefixes like 【...】 and stripping whitespace
             df.columns = df.columns.str.replace(r'【.*?】', '', regex=True).str.strip()
             df.columns = df.columns.str.replace('\n', ' ', regex=False)
             all_dfs.append(df)
@@ -29,7 +27,7 @@ def load_and_concat(file_paths):
 
 # --- App Header and File Definitions ---
 st.title("📊 問卷資料互動分析報告")
-st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。")
+st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。 সন")
 
 # --- Use RELATIVE paths for deployment ---
 COMPANY_P1_FILE = "STANDARD_8RG8Y_未上市櫃公司治理問卷第一階段_202511050604_690ae8db08878.csv"
@@ -54,8 +52,7 @@ df_to_analyze = pd.DataFrame()
 try:
     df_new_multi = load_and_concat([COMPANY_NEW_MULTIPHASE_FILE])
 except Exception as e:
-    # This will be caught by the load_and_concat function, but as a fallback:
-    st.error(f"無法讀取新的公司方問卷檔案: {COMPANY_NEW_MULTIPHASE_FILE}。請確認此檔案已上傳。")
+    st.error(f"無法讀取新的公司方問卷檔案: {COMPANY_NEW_MULTIPHASE_FILE}。請確認此檔案已上傳。 সন")
     df_new_multi = pd.DataFrame()
 
 if analysis_mode == '分開比較':
@@ -128,25 +125,27 @@ if df_to_analyze is not None and not df_to_analyze.empty:
     analysis_cols = list(pd.Series(analysis_cols)) # Get unique columns while preserving order
 
     for i, col_name in enumerate(analysis_cols):
-        with st.expander(f"題目：{col_name}", expanded=expand_all):
-            col_data = df_to_analyze[col_name].dropna()
-            if col_data.empty: st.warning("此欄位無有效資料可供分析。"); continue
-            is_multiselect = False
-            if col_data.dtype == 'object':
-                non_empty_data = col_data[col_data.astype(str) != '']
-                if not non_empty_data.empty and non_empty_data.str.contains('\n').any(): is_multiselect = True
-            if is_multiselect:
-                st.markdown("##### 複選題選項次數分佈"); exploded_data = col_data.str.split('\n').explode().str.strip(); exploded_data = exploded_data[exploded_data != '']; stats_df = exploded_data.value_counts().reset_index(); stats_df.columns = ['獨立選項', '次數']; st.dataframe(stats_df)
-                st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['獨立選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
-            else:
-                is_numeric = pd.api.types.is_numeric_dtype(col_data)
-                if not is_numeric:
-                    numeric_version = pd.to_numeric(col_data, errors='coerce');
-                    if (numeric_version.notna().sum() / len(col_data) > 0.7): is_numeric = True; col_data = numeric_version.dropna()
-                if is_numeric:
-                    st.markdown("##### 數值型資料統計摘要"); st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}")); st.markdown("##### 盒狀圖"); fig = go.Figure(data=[go.Box(y=col_data, name=col_name)]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_num")
+        col_data = df_to_analyze[col_name].dropna()
+        # Only show the expander if there is data for the question in the current view
+        if not col_data.empty:
+            with st.expander(f"題目：{col_name}", expanded=expand_all):
+                # Heuristic to detect multi-select questions
+                is_multiselect = False
+                if col_data.dtype == 'object':
+                    non_empty_data = col_data[col_data.astype(str) != '']
+                    if not non_empty_data.empty and non_empty_data.str.contains('\n').any(): is_multiselect = True
+                if is_multiselect:
+                    st.markdown("##### 複選題選項次數分佈"); exploded_data = col_data.str.split('\n').explode().str.strip(); exploded_data = exploded_data[exploded_data != '']; stats_df = exploded_data.value_counts().reset_index(); stats_df.columns = ['獨立選項', '次數']; st.dataframe(stats_df)
+                    st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['獨立選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
                 else:
-                    st.markdown("##### 類別型資料次數分佈"); stats_df = col_data.astype(str).value_counts().reset_index(); stats_df.columns = ['答案選項', '次數']; st.dataframe(stats_df)
-                    st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
+                    is_numeric = pd.api.types.is_numeric_dtype(col_data)
+                    if not is_numeric:
+                        numeric_version = pd.to_numeric(col_data, errors='coerce');
+                        if (numeric_version.notna().sum() / len(col_data) > 0.7): is_numeric = True; col_data = numeric_version.dropna()
+                    if is_numeric:
+                        st.markdown("##### 數值型資料統計摘要"); st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}")); st.markdown("##### 盒狀圖"); fig = go.Figure(data=[go.Box(y=col_data, name=col_name)]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_num")
+                    else:
+                        st.markdown("##### 類別型資料次數分佈"); stats_df = col_data.astype(str).value_counts().reset_index(); stats_df.columns = ['答案選項', '次數']; st.dataframe(stats_df)
+                        st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
 else:
-    st.warning("沒有載入任何資料，請檢查檔案路徑和選擇的選項。")
+    st.warning("沒有載入任何資料，請檢查檔案路徑和選擇的選項。 সন")
