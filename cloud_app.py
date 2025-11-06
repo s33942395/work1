@@ -106,8 +106,30 @@ if df_to_analyze is not None and not df_to_analyze.empty:
                     non_empty_data = col_data[col_data.astype(str) != '']
                     if not non_empty_data.empty and non_empty_data.str.contains('\n').any(): is_multiselect = True
                 if is_multiselect:
-                    st.markdown("##### 複選題選項次數分佈"); exploded_data = col_data.str.split('\n').explode().str.strip(); exploded_data = exploded_data[exploded_data != '']; stats_df = exploded_data.value_counts().reset_index(); stats_df.columns = ['獨立選項', '次數']; st.dataframe(stats_df)
-                    st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['獨立選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
+                    st.markdown("##### 複選題選項次數分佈")
+                    exploded = col_data.astype(str).str.split('\n').explode().str.strip()
+                    exploded = exploded[exploded != '']
+                    total_counts = exploded.value_counts().reset_index()
+                    total_counts.columns = ['獨立選項', '次數']
+                    st.dataframe(total_counts)
+
+                    # 若資料含階段欄位且有多個階段，則按階段分色（堆疊）
+                    if PHASE_COLUMN_NAME in df_to_analyze.columns and df_to_analyze[PHASE_COLUMN_NAME].notna().any() and df_to_analyze[PHASE_COLUMN_NAME].nunique() > 1:
+                        st.markdown("##### 各階段分佈（不同顏色代表不同階段，採堆疊顯示）")
+                        exploded_df = exploded.to_frame(name='option')
+                        exploded_df['phase'] = df_to_analyze.loc[exploded_df.index, PHASE_COLUMN_NAME].fillna('未標註階段')
+                        pivot = exploded_df.groupby(['option', 'phase']).size().unstack(fill_value=0)
+                        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+                        fig = go.Figure()
+                        for j, phase in enumerate(pivot.columns):
+                            fig.add_trace(go.Bar(x=pivot.index, y=pivot[phase], name=str(phase), marker_color=colors[j % len(colors)]))
+                        fig.update_layout(barmode='stack', xaxis_tickangle=0, template="plotly_white")
+                        st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
+                    else:
+                        st.markdown("##### 垂直長條圖")
+                        fig = go.Figure(data=[go.Bar(x=total_counts['獨立選項'], y=total_counts['次數'])])
+                        fig.update_layout(xaxis_tickangle=0, template="plotly_white")
+                        st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_multi")
                 else:
                     is_numeric = pd.api.types.is_numeric_dtype(col_data)
                     if not is_numeric:
@@ -116,6 +138,27 @@ if df_to_analyze is not None and not df_to_analyze.empty:
                     if is_numeric:
                         st.markdown("##### 數值型資料統計摘要"); st.dataframe(col_data.describe().to_frame().T.style.format("{:,.2f}")); st.markdown("##### 盒狀圖"); fig = go.Figure(data=[go.Box(y=col_data, name=col_name)]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_num")
                     else:
-                        st.markdown("##### 類別型資料次數分佈"); stats_df = col_data.astype(str).value_counts().reset_index(); stats_df.columns = ['答案選項', '次數']; st.dataframe(stats_df)
-                        st.markdown("##### 垂直長條圖"); fig = go.Figure(data=[go.Bar(x=stats_df['答案選項'], y=stats_df['次數'])]); fig.update_layout(xaxis_tickangle=0, template="plotly_white"); st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
+                        st.markdown("##### 類別型資料次數分佈")
+                        s = col_data.astype(str)
+                        total = s.value_counts().reset_index()
+                        total.columns = ['答案選項', '次數']
+                        st.dataframe(total)
+
+                        # 若資料含階段欄位且有多個階段，則按階段分色（堆疊）
+                        if PHASE_COLUMN_NAME in df_to_analyze.columns and df_to_analyze[PHASE_COLUMN_NAME].notna().any() and df_to_analyze[PHASE_COLUMN_NAME].nunique() > 1:
+                            st.markdown("##### 各階段分佈（不同顏色代表不同階段，採堆疊顯示）")
+                            df_pair = s.to_frame(name='ans')
+                            df_pair['phase'] = df_to_analyze.loc[df_pair.index, PHASE_COLUMN_NAME].fillna('未標註階段')
+                            pivot = df_pair.groupby(['ans', 'phase']).size().unstack(fill_value=0)
+                            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+                            fig = go.Figure()
+                            for j, phase in enumerate(pivot.columns):
+                                fig.add_trace(go.Bar(x=pivot.index, y=pivot[phase], name=str(phase), marker_color=colors[j % len(colors)]))
+                            fig.update_layout(barmode='stack', xaxis_tickangle=0, template="plotly_white")
+                            st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
+                        else:
+                            st.markdown("##### 垂直長條圖")
+                            fig = go.Figure(data=[go.Bar(x=total['答案選項'], y=total['次數'])])
+                            fig.update_layout(xaxis_tickangle=0, template="plotly_white")
+                            st.plotly_chart(fig, use_container_width=True, key=f"plot_{report_title}_{i}_cat")
 else: st.warning("在此選擇下沒有載入任何資料，請檢查您的選擇和檔案。")
