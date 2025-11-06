@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -27,14 +28,14 @@ st.title("📊 問卷資料互動分析報告")
 st.markdown("請先選擇分析模式，然後再根據提示選擇要查看的資料範圍。")
 
 # --- File Definitions ---
-base_path = "/Users/liuchenbang/Desktop/工作/"
-COMPANY_P1_FILE = base_path + "STANDARD_8RG8Y_未上市櫃公司治理問卷第一階段_202511050604_690ae8db08878.csv"
-COMPANY_P2_FILE = base_path + "STANDARD_7RGxP_未上市櫃公司治理問卷第二階段_202511050605_690ae92a9a127.csv"
-COMPANY_P3_FILE = base_path + "STANDARD_Yb9D2_未上市櫃公司治理問卷第三階段_202511050605_690ae9445a228.csv"
-INVESTOR_P1_FILE = base_path + "STANDARD_NwNYM_未上市櫃公司治理問卷第一階段投資方_202511060133_690bfaccec28e.csv"
-INVESTOR_P2_FILE = base_path + "STANDARD_v2xYO_未上市櫃公司治理問卷第二階段投資方_202511060133_690bfae9b9065.csv"
-INVESTOR_P3_FILE = base_path + "STANDARD_we89e_未上市櫃公司治理問卷第三階段投資方_202511060133_690bfb0524491.csv"
-COMPANY_NEW_MULTIPHASE_FILE = base_path + "STANDARD_v2xkX_未上市櫃公司治理問卷_202511060532_690c3305c62b5.csv"
+# Using relative paths for deployment
+COMPANY_P1_FILE = "STANDARD_8RG8Y_未上市櫃公司治理問卷第一階段_202511050604_690ae8db08878.csv"
+COMPANY_P2_FILE = "STANDARD_7RGxP_未上市櫃公司治理問卷第二階段_202511050605_690ae92a9a127.csv"
+COMPANY_P3_FILE = "STANDARD_Yb9D2_未上市櫃公司治理問卷第三階段_202511050605_690ae9445a228.csv"
+INVESTOR_P1_FILE = "STANDARD_NwNYM_未上市櫃公司治理問卷第一階段投資方_202511060133_690bfaccec28e.csv"
+INVESTOR_P2_FILE = "STANDARD_v2xYO_未上市櫃公司治理問卷第二階段投資方_202511060133_690bfae9b9065.csv"
+INVESTOR_P3_FILE = "STANDARD_we89e_未上市櫃公司治理問卷第三階段投資方_202511060133_690bfb0524491.csv"
+COMPANY_NEW_MULTIPHASE_FILE = "STANDARD_v2xkX_未上市櫃公司治理問卷_202511060532_690c3305c62b5.csv"
 PHASE_COLUMN_NAME = "請問公司目前主要處於哪個發展階段？："
 
 company_files = {"第一階段": COMPANY_P1_FILE, "第二階段": COMPANY_P2_FILE, "第三階段": COMPANY_P3_FILE}
@@ -60,7 +61,7 @@ if analysis_mode == '總體統計摘要':
             corr_df = all_df[numeric_cols].corr()
             fig = go.Figure(data=go.Heatmap(z=corr_df.values, x=corr_df.columns, y=corr_df.columns, colorscale='Blues'))
             fig.update_layout(title='數值變數之間的相關性')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="corr_matrix")
 
         with st.expander("2. 公司方 vs. 投資方 差異檢定 (T-test)", expanded=True):
             num_col_to_test = '請問公司的實收資本額：'
@@ -119,15 +120,22 @@ else: # Detailed question-by-question browser
             else: files_to_load = list(investor_files.values())
             if files_to_load: df_list.append(load_and_concat(files_to_load))
         if df_list: df_to_analyze = pd.concat(df_list, ignore_index=True, sort=False)
-    else: # Merged Analysis
+    
+    elif analysis_mode == '合併分析':
         merge_option = st.selectbox("**步驟二：請選擇合併範圍**", ("第一階段 (合併)", "第二階段 (合併)", "第三階段 (合併)", "不分階段 (全部合併)"), key='phase_selector_merged')
         report_title = merge_option
         files_to_load = []
         phase_filter = None
-        if merge_option == "第一階段 (合併)": files_to_load, phase_filter = [COMPANY_P1_FILE, INVESTOR_P1_FILE], "第一階段"
-elif merge_option == "第二階段 (合併)": files_to_load, phase_filter = [COMPANY_P2_FILE, INVESTOR_P2_FILE], "第二階段"
-elif merge_option == "第三階段 (合併)": files_to_load = [COMPANY_P3_FILE, INVESTOR_P3_FILE]
-else: files_to_load = list(company_files.values()) + list(investor_files.values()) + [COMPANY_NEW_MULTIPHASE_FILE]
+        if merge_option == "第一階段 (合併)":
+            files_to_load = [COMPANY_P1_FILE, INVESTOR_P1_FILE]
+            phase_filter = "第一階段"
+        elif merge_option == "第二階段 (合併)":
+            files_to_load = [COMPANY_P2_FILE, INVESTOR_P2_FILE]
+            phase_filter = "第二階段"
+        elif merge_option == "第三階段 (合併)":
+            files_to_load = [COMPANY_P3_FILE, INVESTOR_P3_FILE]
+        else: # All
+            files_to_load = list(company_files.values()) + list(investor_files.values()) + [COMPANY_NEW_MULTIPHASE_FILE]
         df_base = load_and_concat(files_to_load)
         df_list = [df_base]
         if phase_filter:
@@ -149,7 +157,7 @@ else: files_to_load = list(company_files.values()) + list(investor_files.values(
         for i, col_name in enumerate(analysis_cols):
             with st.expander(f"題目：{col_name}", expanded=expand_all):
                 col_data = df_to_analyze[col_name].dropna()
-                if col_data.empty: st.warning("此欄位無有效資料可供分析。"); continue
+                if col_data.empty: continue
                 is_multiselect = False
                 if col_data.dtype == 'object':
                     non_empty_data = col_data[col_data.astype(str) != '']
