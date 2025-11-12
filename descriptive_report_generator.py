@@ -853,13 +853,66 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
     doc.add_page_break()  # 每個議題後分頁
     return doc
 
-def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷描述性統計報告_完整版.docx"):
+def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷描述性統計報告_完整版.docx", add_metadata=True):
     """
     生成完整描述性統計報告（Word 格式）
     包含更多題目，附上政府統計風格表格
     即使統計檢定沒過也提供敘述性分析
+    
+    參數:
+        df: pandas DataFrame - 問卷資料
+        output_path: str - 輸出檔案路徑
+        add_metadata: bool - 是否自動添加 respondent_type 和 phase 欄位（根據檔案名推斷）
     """
     print("開始生成描述性統計報告...")
+    
+    # 自動添加 metadata 欄位（如果尚未存在）
+    if add_metadata:
+        # 添加 respondent_type（如果有 _source_file 欄位）
+        if '_source_file' in df.columns and 'respondent_type' not in df.columns:
+            def infer_role(fname):
+                if not isinstance(fname, str):
+                    return '未知'
+                if '投資' in fname or 'INVEST' in fname.upper():
+                    return '投資方'
+                return '公司方'
+            df['respondent_type'] = df['_source_file'].astype(str).apply(infer_role)
+            print("✓ 已自動添加 respondent_type 欄位")
+        
+        # 添加 phase（從檔案名或欄位推斷）
+        if 'phase' not in df.columns:
+            # 嘗試從 _source_file 推斷階段
+            if '_source_file' in df.columns:
+                def infer_phase(fname):
+                    if not isinstance(fname, str):
+                        return '未標註'
+                    if '第一階段' in fname or '一階段' in fname:
+                        return '第一階段'
+                    if '第二階段' in fname or '二階段' in fname:
+                        return '第二階段'
+                    if '第三階段' in fname or '三階段' in fname:
+                        return '第三階段'
+                    return '未標註'
+                df['phase'] = df['_source_file'].astype(str).apply(infer_phase)
+                print("✓ 已自動添加 phase 欄位")
+            
+            # 或從問卷欄位推斷
+            phase_col_candidates = [col for col in df.columns if '階段' in col and '問卷' in col]
+            if phase_col_candidates and 'phase' not in df.columns:
+                phase_col = phase_col_candidates[0]
+                def extract_phase(val):
+                    if pd.isna(val):
+                        return '未標註'
+                    val_str = str(val)
+                    if '第一階段' in val_str:
+                        return '第一階段'
+                    if '第二階段' in val_str:
+                        return '第二階段'
+                    if '第三階段' in val_str:
+                        return '第三階段'
+                    return '未標註'
+                df['phase'] = df[phase_col].apply(extract_phase)
+                print(f"✓ 從欄位 '{phase_col}' 推斷 phase")
     
     # 創建基礎文件
     doc = generate_descriptive_report_word(df, output_path)
