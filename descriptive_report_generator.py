@@ -475,7 +475,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
         
         add_statistics_table(doc, table_data, title=f"{topic_title} - 整體分佈表")
         
-        # === 加入圓餅圖 ===
+        # === 加入長條圖 ===
         doc.add_paragraph()
         doc.add_paragraph('【圖表呈現】', style='Heading 4')
         
@@ -483,12 +483,26 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
             # 獲取所有類別（排除 '合計'）
             categories = [idx for idx in crosstab.index if idx != '合計']
             values = [crosstab.loc[idx, '次數'] for idx in categories]
+            percentages = [crosstab.loc[idx, '百分比'] for idx in categories]
             
-            # 創建圓餅圖
-            fig = go.Figure(data=[go.Pie(labels=categories, values=values, hole=0.3)])
+            # 創建長條圖（改用已驗證可正確顯示中文的長條圖）
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=categories,
+                y=values,
+                text=[f'{v}人<br>({p:.1f}%)' for v, p in zip(values, percentages)],
+                textposition='outside',
+                marker_color='lightblue'
+            ))
+            
             fig.update_layout(
-                title=f"{topic_title} - 整體分佈",
-                font=dict(family="Microsoft YaHei, Arial", size=12)
+                title=dict(text=f"{topic_title} - 整體分佈", font=dict(size=16, family='Microsoft JhengHei')),
+                xaxis=dict(title='', tickfont=dict(size=11, family='Microsoft JhengHei')),
+                yaxis=dict(title='人數', tickfont=dict(size=11)),
+                showlegend=False,
+                height=400,
+                margin=dict(t=80, b=100),
+                font=dict(family='Microsoft JhengHei')
             )
             
             # 儲存圖片
