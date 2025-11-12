@@ -637,11 +637,25 @@ def load_and_concat(file_paths):
         df = None
         for enc in ("utf-8", "utf-8-sig", "latin1"):
             try:
-                df = pd.read_csv(path, encoding=enc)
-                # 檢查第一行是否為檔案名稱（只有1個欄位且內容是檔名）
-                if len(df.columns) == 1 and 'STANDARD_' in str(df.columns[0]):
-                    # 重新讀取，跳過第一行
+                # 先讀取前2行檢查格式
+                df_check = pd.read_csv(path, encoding=enc, nrows=2)
+                
+                # 檢查第一列的第一個欄位值是否包含檔案名稱格式
+                first_col = df_check.columns[0]
+                first_val = str(df_check.iloc[0, 0]) if len(df_check) > 0 else ''
+                
+                # 如果第一列第一個值看起來像檔名，或第一欄名稱包含STANDARD_，則跳過第一行
+                should_skip = False
+                if 'STANDARD_' in first_col or 'STANDARD_' in first_val:
+                    should_skip = True
+                # 或者檢查是否第一列所有值都是NaN（表示第一行只是檔名）
+                elif len(df_check) > 0 and df_check.iloc[0].isna().all():
+                    should_skip = True
+                
+                if should_skip:
                     df = pd.read_csv(path, encoding=enc, skiprows=1)
+                else:
+                    df = pd.read_csv(path, encoding=enc)
                 break
             except Exception:
                 pass
