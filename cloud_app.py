@@ -2062,10 +2062,16 @@ if analysis_mode == '合併分析':
         if st.button("📝 生成描述性統計報告（Word）", type="primary", use_container_width=True):
             with st.spinner("正在生成 Word 報告..."):
                 try:
+                    # 使用臨時目錄生成 Word 報告
+                    import tempfile
+                    import os
+                    temp_dir = tempfile.gettempdir()
+                    output_path = os.path.join(temp_dir, "問卷描述性統計報告_完整版.docx")
+                    
                     # 生成 Word 報告
                     output_path = generate_full_descriptive_report(
                         df_to_analyze,
-                        output_path="/workspaces/work1/問卷描述性統計報告_完整版.docx"
+                        output_path=output_path
                     )
                     
                     # 讀取檔案供下載
