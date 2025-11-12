@@ -18,7 +18,7 @@ import re
 
 def smart_sort_categories(categories):
     """
-    智慧排序類別資料 - 與 cloud_app.py 完全一致
+    智慧排序類別資料 - 與 cloud_app.py 完全一致（改進版）
     處理百分比、數值範圍、階段、是否等特殊格式
     """
     if len(categories) == 0:
@@ -29,57 +29,71 @@ def smart_sort_categories(categories):
     def sort_key(item):
         item_str = str(item).strip()
         
-        # 1. 百分比範圍
+        # 1. 百分比範圍和特殊情況
+        # 先檢查"以下"（應該排在最前）
+        if '以下' in item_str:
+            below_match = re.search(r'(\d+\.?\d*)\s*[%％]?\s*以下', item_str)
+            if below_match:
+                return (0, -1, float(below_match.group(1)))  # 用 -1 確保排在範圍前
+        
+        # 檢查"以上"（應該排在最後）
+        if '以上' in item_str:
+            above_match = re.search(r'(\d+\.?\d*)\s*[%％]?\s*以上', item_str)
+            if above_match:
+                return (0, 1000, float(above_match.group(1)))  # 用 1000 確保排在最後
+        
+        # 百分比範圍 (如 10-20%, 20%-30%)
         percent_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[%％]', item_str)
         if percent_match:
-            return (0, float(percent_match.group(1)))
+            return (0, 0, float(percent_match.group(1)))
         
+        # 單一百分比 (如 30%)
         single_percent = re.match(r'(\d+\.?\d*)\s*[%％]', item_str)
         if single_percent:
-            return (0, float(single_percent.group(1)))
+            return (0, 0, float(single_percent.group(1)))
         
         # 2. 年份範圍
         year_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*年', item_str)
         if year_match:
-            return (1, float(year_match.group(1)))
+            return (1, 0, float(year_match.group(1)))
         
         # 3. 金額範圍
         money_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[萬億]', item_str)
         if money_match:
-            return (2, float(money_match.group(1)))
+            return (2, 0, float(money_match.group(1)))
         
         # 4. 月份範圍
         month_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*個?月', item_str)
         if month_match:
-            return (3, float(month_match.group(1)))
+            return (3, 0, float(month_match.group(1)))
         
         # 5. 人數範圍
         people_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*人', item_str)
         if people_match:
-            return (4, float(people_match.group(1)))
+            return (4, 0, float(people_match.group(1)))
         
         # 6. 頻率
         freq_order = {'每週': 1, '每月': 2, '每季': 3, '每半年': 4, '每年': 5, '不定期': 6, '無': 7}
         for key, value in freq_order.items():
             if key in item_str:
-                return (5, value)
+                return (5, 0, value)
         
         # 7. 階段
         if '第一階段' in item_str or '階段1' in item_str:
-            return (6, 1)
+            return (6, 0, 1)
         if '第二階段' in item_str or '階段2' in item_str:
-            return (6, 2)
+            return (6, 0, 2)
         if '第三階段' in item_str or '階段3' in item_str:
-            return (6, 3)
+            return (6, 0, 3)
         
         # 8. 是/否
         if item_str in ['是', 'Yes', 'yes', '有']:
-            return (7, 1)
+            return (7, 0, 1)
         if item_str in ['否', 'No', 'no', '無']:
-            return (7, 2)
+            return (7, 0, 2)
         
         # 9. 一般文字
-        return (10, item_str)
+        return (10, 0, item_str)
     
     try:
         sorted_list = sorted(categories_list, key=sort_key)
