@@ -638,6 +638,10 @@ def load_and_concat(file_paths):
         for enc in ("utf-8", "utf-8-sig", "latin1"):
             try:
                 df = pd.read_csv(path, encoding=enc)
+                # 檢查第一行是否為檔案名稱（只有1個欄位且內容是檔名）
+                if len(df.columns) == 1 and 'STANDARD_' in str(df.columns[0]):
+                    # 重新讀取，跳過第一行
+                    df = pd.read_csv(path, encoding=enc, skiprows=1)
                 break
             except Exception:
                 pass
