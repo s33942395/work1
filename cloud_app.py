@@ -12,6 +12,108 @@ from difflib import SequenceMatcher
 
 warnings.filterwarnings('ignore')
 
+# --- 智慧排序函式 ---
+def smart_sort_categories(categories):
+    """
+    智慧排序類別資料，處理：
+    1. 百分比範圍 (如 10-20%, 20-30%)
+    2. 數值範圍 (如 1-5年, 5-10年)
+    3. 金額範圍 (如 100-500萬, 500-1000萬)
+    4. 階段 (第一階段, 第二階段, 第三階段)
+    5. 一般文字 (按原順序或字母排序)
+    """
+    if len(categories) == 0:
+        return []
+    
+    categories_list = list(categories)
+    
+    # 定義排序鍵函式
+    def sort_key(item):
+        item_str = str(item).strip()
+        
+        # 1. 處理百分比範圍 (如 10-20%, 20%-30%)
+        percent_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[%％]', item_str)
+        if percent_match:
+            return (0, float(percent_match.group(1)))
+        
+        # 單一百分比 (如 30%)
+        single_percent = re.match(r'(\d+\.?\d*)\s*[%％]', item_str)
+        if single_percent:
+            return (0, float(single_percent.group(1)))
+        
+        # 2. 處理年份範圍 (如 1-5年, 5-10年)
+        year_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*年', item_str)
+        if year_match:
+            return (1, float(year_match.group(1)))
+        
+        # 3. 處理金額範圍 (如 100-500萬, 1000-5000萬)
+        money_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[萬億]', item_str)
+        if money_match:
+            return (2, float(money_match.group(1)))
+        
+        # 4. 處理月份範圍 (如 1-3個月, 3-6個月)
+        month_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*個?月', item_str)
+        if month_match:
+            return (3, float(month_match.group(1)))
+        
+        # 5. 處理人數範圍 (如 1-10人, 10-50人)
+        people_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*人', item_str)
+        if people_match:
+            return (4, float(people_match.group(1)))
+        
+        # 6. 處理次數 (如 每月1次, 每季1次, 每年1次)
+        freq_order = {'每週': 1, '每月': 2, '每季': 3, '每半年': 4, '每年': 5, '不定期': 6, '無': 7}
+        for key, value in freq_order.items():
+            if key in item_str:
+                return (5, value)
+        
+        # 7. 處理階段 (第一階段, 第二階段, 第三階段)
+        stage_match = re.search(r'[第]?([一二三四五1234])[階段期]', item_str)
+        if stage_match:
+            stage_num = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '1': 1, '2': 2, '3': 3, '4': 4}.get(stage_match.group(1), 0)
+            return (6, stage_num)
+        
+        # 8. 處理程度 (完全沒有, 部分有, 完全有)
+        degree_order = {
+            '完全沒有': 1, '沒有': 1, '無': 1,
+            '極少': 2, '很少': 2,
+            '部分': 3, '部分有': 3, '部份': 3,
+            '大部分': 4, '大部分有': 4,
+            '完全': 5, '完全有': 5, '有': 5, '是': 5
+        }
+        for key, value in degree_order.items():
+            if key in item_str:
+                return (7, value)
+        
+        # 9. 處理比較級 (低於, 符合, 高於)
+        compare_order = {'低於': 1, '低': 1, '符合': 2, '相當': 2, '高於': 3, '高': 3, '超過': 3}
+        for key, value in compare_order.items():
+            if key in item_str:
+                return (8, value)
+        
+        # 10. 處理純數字開頭
+        num_match = re.match(r'^(\d+\.?\d*)', item_str)
+        if num_match:
+            return (9, float(num_match.group(1)))
+        
+        # 11. 特殊處理：「以上」應該排在最後
+        if '以上' in item_str or '或以上' in item_str or '以上' in item_str:
+            # 提取數字
+            num_in_above = re.search(r'(\d+\.?\d*)', item_str)
+            if num_in_above:
+                return (10, float(num_in_above.group(1)))
+        
+        # 12. 預設：按字典順序
+        return (99, item_str)
+    
+    # 執行排序
+    try:
+        sorted_categories = sorted(categories_list, key=sort_key)
+        return sorted_categories
+    except:
+        # 如果排序失敗，返回原順序
+        return categories_list
+
 # --- 統計函式定義 ---
 def format_p_value(p):
     """顯著性標記"""
@@ -1030,6 +1132,239 @@ def generate_report_recommendations(df, cols_to_analyze, analysis_mode):
     recommendations.sort(key=lambda x: x['優先順序'], reverse=True)
     return recommendations
 
+def generate_professional_report(df, recommendations, cols_to_analyze, analysis_mode):
+    """
+    生成符合國發基金需求的專業分析報告
+    結構：執行摘要 → 方法論 → 主要發現 → 結論與建議
+    """
+    report = []
+    
+    # === 1. 標題與基本資訊 ===
+    report.append("# 未上市櫃公司治理問卷分析報告")
+    report.append(f"\n**報告產生時間：** {datetime.now().strftime('%Y年%m月%d日 %H:%M')}")
+    report.append(f"\n**分析模式：** {analysis_mode}")
+    report.append(f"\n**總樣本數：** {len(df)} 筆")
+    
+    if 'respondent_type' in df.columns:
+        respondent_counts = df['respondent_type'].value_counts()
+        report.append(f"\n**填答者分佈：**")
+        for resp_type, count in respondent_counts.items():
+            report.append(f"- {resp_type}：{count} 筆 ({count/len(df)*100:.1f}%)")
+    
+    if 'phase' in df.columns and df['phase'].notna().any():
+        phase_counts = df['phase'].value_counts()
+        report.append(f"\n**階段分佈：**")
+        for phase, count in phase_counts.items():
+            report.append(f"- {phase}：{count} 筆 ({count/len(df)*100:.1f}%)")
+    
+    report.append("\n---\n")
+    
+    # === 2. 執行摘要 ===
+    report.append("## 📋 執行摘要\n")
+    report.append("本報告針對未上市櫃公司治理問卷進行全面性統計分析，主要目的在於瞭解公司方與投資方對公司治理實務的認知差異，以及不同階段公司在治理面向的發展狀況。\n")
+    
+    # 找出最重要的3-5個發現
+    top_findings = recommendations[:min(5, len(recommendations))]
+    report.append("### 關鍵發現：\n")
+    for idx, rec in enumerate(top_findings, 1):
+        topic = rec['完整題目']
+        priority = rec['優先順序']
+        reasons = rec['推薦理由']
+        
+        # 將統計術語轉為業務語言
+        business_insight = []
+        for reason in reasons:
+            if "公司方/投資方" in reason and "顯著差異" in reason:
+                business_insight.append("**公司方與投資方對此議題的看法存在顯著落差**，建議關注雙方認知差異的根源")
+            elif "分佈顯著差異" in reason:
+                business_insight.append("**不同群體在此議題上呈現明顯差異**，值得進一步探討造成差異的因素")
+            elif "資料完整度高" in reason:
+                business_insight.append("此議題獲得高度關注，資料品質優良")
+            elif "答案具多樣性" in reason:
+                business_insight.append("受訪者回應具多樣性，反映實務做法的多元性")
+        
+        report.append(f"{idx}. **{topic[:60]}{'...' if len(topic) > 60 else ''}**")
+        report.append(f"   - 重要性評分：{priority:.1f} 分")
+        if business_insight:
+            report.append(f"   - 業務意涵：{business_insight[0]}")
+        report.append("")
+    
+    report.append("\n---\n")
+    
+    # === 3. 方法論 ===
+    report.append("## 🔬 研究方法論\n")
+    report.append("### 3.1 資料來源與樣本\n")
+    report.append(f"本研究分析 {len(df)} 筆問卷資料，涵蓋 {len(cols_to_analyze)} 個分析面向。")
+    
+    if 'respondent_type' in df.columns:
+        report.append("資料來源包含公司方填答與投資方填答，可進行雙向比對分析。\n")
+    
+    report.append("### 3.2 統計分析方法\n")
+    report.append("本研究採用以下統計方法：\n")
+    report.append("1. **描述性統計**：計算次數分佈、百分比、平均數、中位數等基本統計量")
+    report.append("2. **卡方檢定（Chi-square test）**：檢驗類別變項在不同群體間的分佈差異")
+    report.append("3. **Mann-Whitney U 檢定**：檢驗數值變項在兩組間的分佈差異（非參數檢定）")
+    report.append("4. **Kruskal-Wallis 檢定**：檢驗數值變項在多組間的分佈差異（非參數檢定）")
+    report.append("5. **Fisher 精確檢定**：針對小樣本的類別變項進行精確機率檢定\n")
+    
+    report.append("### 3.3 顯著性水準\n")
+    report.append("本研究採用以下顯著性標準：")
+    report.append("- p < 0.001：極顯著差異 (⭐⭐⭐)")
+    report.append("- p < 0.01：非常顯著差異 (⭐⭐)")
+    report.append("- p < 0.05：顯著差異 (⭐)")
+    report.append("- p ≥ 0.05：無顯著差異\n")
+    
+    report.append("\n---\n")
+    
+    # === 4. 主要發現 ===
+    report.append("## 📊 主要發現\n")
+    
+    # 按優先順序分組
+    high_priority = [r for r in recommendations if r['優先順序'] >= 3]
+    medium_priority = [r for r in recommendations if 2 <= r['優先順序'] < 3]
+    
+    if high_priority:
+        report.append("### 4.1 高度關注議題（優先順序 ≥ 3）\n")
+        report.append("以下議題在統計分析中呈現極顯著或多重顯著差異，建議優先關注：\n")
+        
+        for idx, rec in enumerate(high_priority, 1):
+            report.append(f"#### 議題 {idx}：{rec['完整題目']}\n")
+            report.append(f"**樣本數：** {rec['樣本數']} | **缺失率：** {rec['缺失率']} | **優先順序：** {rec['優先順序']:.1f}\n")
+            
+            # 統計結果解讀
+            if '統計結果' in rec and rec['統計結果']:
+                stats = rec['統計結果']
+                
+                if 'p' in stats:
+                    p_val = stats['p']
+                    sig_level = "極顯著" if p_val < 0.001 else "非常顯著" if p_val < 0.01 else "顯著"
+                    report.append(f"**統計檢定結果：**")
+                    report.append(f"- p-value = {p_val:.4f} ({sig_level})")
+                    
+                    if 'median_diff' in stats:
+                        report.append(f"- 中位數差異：{stats['median_diff']:.2f}")
+                    
+                    # 業務解讀
+                    report.append(f"\n**業務解讀：**")
+                    if p_val < 0.001:
+                        report.append("此議題在不同群體間存在極顯著差異（p < 0.001），顯示雙方在認知或實務上有本質性的差距。建議深入探討造成差異的結構性因素，並評估是否需要政策介入或輔導機制。")
+                    elif p_val < 0.01:
+                        report.append("此議題呈現高度顯著差異（p < 0.01），反映不同群體在此面向的經驗或期待有明顯落差。建議納入後續輔導計畫的重點項目。")
+                    else:
+                        report.append("此議題存在顯著差異（p < 0.05），值得關注並進一步分析差異成因。")
+                
+                if '顯著選項數' in stats:
+                    sig_count = stats['顯著選項數']
+                    report.append(f"\n- 有 {sig_count} 個選項呈現顯著差異")
+                    report.append(f"- **解讀：** 此複選題中有多個選項在不同群體間分佈不均，顯示在具體實務做法上存在系統性差異。")
+            
+            report.append("\n" + "- " * 30 + "\n")
+    
+    if medium_priority:
+        report.append("\n### 4.2 重要議題（優先順序 2-3）\n")
+        report.append("以下議題具有統計顯著性或高資料完整度，值得納入報告：\n")
+        
+        for idx, rec in enumerate(medium_priority, 1):
+            report.append(f"**{idx}. {rec['完整題目'][:80]}{'...' if len(rec['完整題目']) > 80 else ''}**")
+            report.append(f"- 樣本數：{rec['樣本數']} | 缺失率：{rec['缺失率']}")
+            report.append(f"- 重點：{'; '.join(rec['推薦理由'][:2])}")
+            report.append("")
+    
+    report.append("\n---\n")
+    
+    # === 5. 結論與建議 ===
+    report.append("## 💡 結論與政策建議\n")
+    
+    report.append("### 5.1 總體觀察\n")
+    report.append(f"本次問卷分析涵蓋 {len(recommendations)} 個具有分析價值的議題，")
+    report.append(f"其中 {len(high_priority)} 個議題呈現高度顯著差異，{len(medium_priority)} 個議題具有重要參考價值。\n")
+    
+    if 'respondent_type' in df.columns:
+        report.append("### 5.2 公司方與投資方的認知落差\n")
+        report.append("分析顯示公司方與投資方在多項公司治理議題上存在認知或實務差異。")
+        report.append("此落差可能來自於：")
+        report.append("- **資訊不對稱**：投資方對公司實務的了解程度有限")
+        report.append("- **期待差異**：雙方對治理標準的認知不一致")
+        report.append("- **實務落差**：公司自評與外部評估的客觀性差異\n")
+    
+    report.append("### 5.3 政策建議\n")
+    report.append("基於上述分析結果，本研究提出以下政策建議供國發基金參考：\n")
+    
+    # 根據高優先順序議題生成具體建議
+    if high_priority:
+        report.append("**針對高度關注議題：**\n")
+        
+        # 分析是否有特定領域的問題
+        governance_issues = [r for r in high_priority if any(kw in r['完整題目'] for kw in ['董事會', '董事', '監察人'])]
+        transparency_issues = [r for r in high_priority if any(kw in r['完整題目'] for kw in ['揭露', '透明', '資訊'])]
+        internal_control_issues = [r for r in high_priority if any(kw in r['完整題目'] for kw in ['內部控制', '流程', '制度'])]
+        
+        if governance_issues:
+            report.append("1. **強化董事會運作機制**")
+            report.append("   - 建議提供未上市櫃公司治理訓練課程")
+            report.append("   - 推動獨立董事或外部董事制度")
+            report.append("   - 建立董事會運作評估機制\n")
+        
+        if transparency_issues:
+            report.append("2. **提升資訊透明度**")
+            report.append("   - 建立資訊揭露標準範本")
+            report.append("   - 鼓勵定期向股東報告")
+            report.append("   - 推動數位化資訊平台\n")
+        
+        if internal_control_issues:
+            report.append("3. **建立內部控制制度**")
+            report.append("   - 提供內控建置輔導服務")
+            report.append("   - 分享最佳實務案例")
+            report.append("   - 建立分階段導入機制\n")
+    
+    report.append("4. **縮小公司方與投資方認知落差**")
+    report.append("   - 定期舉辦溝通座談會")
+    report.append("   - 建立雙向回饋機制")
+    report.append("   - 提供第三方治理評估服務\n")
+    
+    report.append("5. **階段性輔導機制**")
+    report.append("   - 針對不同發展階段提供客製化輔導")
+    report.append("   - 建立標竿企業示範案例")
+    report.append("   - 提供持續追蹤與評估\n")
+    
+    report.append("\n---\n")
+    
+    # === 6. 附錄 ===
+    report.append("## 📎 附錄\n")
+    report.append("### 附錄 A：完整分析議題清單\n")
+    report.append(f"本次分析共涵蓋 {len(recommendations)} 個議題，完整清單如下：\n")
+    
+    report.append("| 排名 | 題目 | 樣本數 | 缺失率 | 優先順序 |")
+    report.append("|------|------|--------|--------|----------|")
+    
+    for idx, rec in enumerate(recommendations[:20], 1):  # 只顯示前20題
+        topic_short = rec['題目'][:40] + '...' if len(rec['題目']) > 40 else rec['題目']
+        report.append(f"| {idx} | {topic_short} | {rec['樣本數']} | {rec['缺失率']} | {rec['優先順序']:.1f} |")
+    
+    if len(recommendations) > 20:
+        report.append(f"\n*註：完整清單包含 {len(recommendations)} 個議題，此處僅顯示前 20 題*\n")
+    
+    report.append("\n### 附錄 B：統計方法說明\n")
+    report.append("**卡方檢定（Chi-square test）**")
+    report.append("- 適用於類別變項的獨立性檢定")
+    report.append("- 零假設：兩個類別變項之間獨立（無關聯）")
+    report.append("- 當 p < 0.05 時拒絕零假設，認為變項間存在關聯\n")
+    
+    report.append("**Mann-Whitney U 檢定**")
+    report.append("- 非參數檢定方法，不假設資料符合常態分佈")
+    report.append("- 適用於比較兩組獨立樣本的分佈")
+    report.append("- 檢驗兩組的中位數是否有顯著差異\n")
+    
+    report.append("**Kruskal-Wallis 檢定**")
+    report.append("- Mann-Whitney U 檢定的擴展版本")
+    report.append("- 適用於比較三組或以上獨立樣本")
+    report.append("- 檢驗多組間是否存在顯著差異\n")
+    
+    report.append("\n---\n")
+    report.append(f"\n**報告結束** | 產生時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    return "\n".join(report)
+
 # 執行題目合併
 st.markdown("### 🔄 正在進行題目去重與合併...")
 with st.spinner("分析題目相似度中..."):
@@ -1205,6 +1540,10 @@ if analysis_mode == '合併分析':
                                     # 計算各選項在不同身分的比例
                                     crosstab = pd.crosstab(df_exp['option'], df_exp['respondent_type'], normalize='columns') * 100
                                     
+                                    # 智慧排序 x 軸
+                                    sorted_index = smart_sort_categories(crosstab.index)
+                                    crosstab = crosstab.reindex(sorted_index)
+                                    
                                     if crosstab.shape[1] >= 2:
                                         # 繪製堆疊長條圖
                                         fig = go.Figure()
@@ -1227,7 +1566,8 @@ if analysis_mode == '合併分析':
                                             yaxis_title='比例 (%)',
                                             template='plotly_white',
                                             height=500,
-                                            xaxis_tickangle=-45
+                                            xaxis_tickangle=-45,
+                                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
                                         )
                                         st.plotly_chart(fig, use_container_width=True)
                                         
@@ -1296,6 +1636,10 @@ if analysis_mode == '合併分析':
                                     # 計算比例
                                     crosstab = pd.crosstab(df_cat['category'], df_cat['respondent_type'], normalize='columns') * 100
                                     
+                                    # 智慧排序 x 軸
+                                    sorted_index = smart_sort_categories(crosstab.index)
+                                    crosstab = crosstab.reindex(sorted_index)
+                                    
                                     if crosstab.shape[1] >= 2:
                                         # 繪製分組長條圖
                                         fig = go.Figure()
@@ -1318,7 +1662,8 @@ if analysis_mode == '合併分析':
                                             yaxis_title='比例 (%)',
                                             template='plotly_white',
                                             height=400,
-                                            xaxis_tickangle=-45
+                                            xaxis_tickangle=-45,
+                                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
                                         )
                                         st.plotly_chart(fig, use_container_width=True)
                                         
@@ -1355,6 +1700,10 @@ if analysis_mode == '合併分析':
                                         # 計算各選項在不同階段的比例
                                         crosstab_phase = pd.crosstab(df_exp['option'], df_exp['phase'], normalize='columns') * 100
                                         
+                                        # 智慧排序 x 軸
+                                        sorted_index = smart_sort_categories(crosstab_phase.index)
+                                        crosstab_phase = crosstab_phase.reindex(sorted_index)
+                                        
                                         # 繪製堆疊長條圖
                                         fig = go.Figure()
                                         colors = ['#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -1376,7 +1725,8 @@ if analysis_mode == '合併分析':
                                             yaxis_title='比例 (%)',
                                             template='plotly_white',
                                             height=500,
-                                            xaxis_tickangle=-45
+                                            xaxis_tickangle=-45,
+                                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
                                         )
                                         st.plotly_chart(fig, use_container_width=True)
                                         
@@ -1476,6 +1826,10 @@ if analysis_mode == '合併分析':
                                         # 計算比例
                                         crosstab_phase = pd.crosstab(df_cat_phase['category'], df_cat_phase['phase'], normalize='columns') * 100
                                         
+                                        # 智慧排序 x 軸
+                                        sorted_index = smart_sort_categories(crosstab_phase.index)
+                                        crosstab_phase = crosstab_phase.reindex(sorted_index)
+                                        
                                         # 繪製分組長條圖
                                         fig = go.Figure()
                                         colors = ['#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -1497,7 +1851,8 @@ if analysis_mode == '合併分析':
                                             yaxis_title='比例 (%)',
                                             template='plotly_white',
                                             height=400,
-                                            xaxis_tickangle=-45
+                                            xaxis_tickangle=-45,
+                                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
                                         )
                                         st.plotly_chart(fig, use_container_width=True)
                                         
@@ -1550,6 +1905,30 @@ if analysis_mode == '合併分析':
             st.info("💡 目前沒有高優先順序（≥ 2）的題目，建議降低篩選標準或檢查資料品質。")
     else:
         st.warning("未找到具有顯著差異的題目")
+    
+    # === 新增：專業報告生成 ===
+    if recommendations:
+        st.markdown("---")
+        st.markdown("### 📄 專業分析報告生成")
+        st.info("✨ 為國發基金量身打造的專業分析報告，採用「執行摘要 → 方法論 → 主要發現 → 結論與建議」結構")
+        
+        if st.button("📊 生成完整分析報告", type="primary"):
+            with st.spinner("正在生成專業報告..."):
+                # 生成報告內容
+                report = generate_professional_report(df_to_analyze, recommendations, cols_to_analyze, analysis_mode)
+                
+                # 顯示報告
+                st.markdown("---")
+                st.markdown(report, unsafe_allow_html=True)
+                
+                # 提供下載選項
+                st.markdown("---")
+                st.download_button(
+                    label="💾 下載報告（Markdown 格式）",
+                    data=report,
+                    file_name=f"未上市櫃公司治理問卷分析報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown"
+                )
 
 # --- 題目顯示區 ---
 st.markdown("---")
@@ -1596,6 +1975,10 @@ for i, col_name in enumerate(cols_to_analyze):
                     exploded_df['phase'] = df_to_analyze.loc[exploded_df.index, PHASE_COLUMN_NAME].fillna('未標註階段')
                     pivot = exploded_df.groupby(['option', 'phase']).size().unstack(fill_value=0)
                     
+                    # 智慧排序 x 軸
+                    sorted_index = smart_sort_categories(pivot.index)
+                    pivot = pivot.reindex(sorted_index)
+                    
                     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
                     fig = go.Figure()
                     for j, phase in enumerate(pivot.columns):
@@ -1605,12 +1988,27 @@ for i, col_name in enumerate(cols_to_analyze):
                             name=str(phase),
                             marker_color=colors[j % len(colors)]
                         ))
-                    fig.update_layout(barmode='stack', xaxis_tickangle=-45, template="plotly_white", height=500)
+                    fig.update_layout(
+                        barmode='stack', 
+                        xaxis_tickangle=-45, 
+                        template="plotly_white", 
+                        height=500,
+                        xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
+                    )
                     st.plotly_chart(fig, use_container_width=True, key=f"multi_{i}_{col_name[:20]}")
                 else:
                     st.markdown("##### 📈 長條圖")
-                    fig = go.Figure(data=[go.Bar(x=total_counts['選項'], y=total_counts['次數'])])
-                    fig.update_layout(xaxis_tickangle=-45, template="plotly_white", height=500)
+                    # 智慧排序 x 軸
+                    sorted_index = smart_sort_categories(total_counts['選項'])
+                    total_counts_sorted = total_counts.set_index('選項').reindex(sorted_index).reset_index()
+                    
+                    fig = go.Figure(data=[go.Bar(x=total_counts_sorted['選項'], y=total_counts_sorted['次數'])])
+                    fig.update_layout(
+                        xaxis_tickangle=-45, 
+                        template="plotly_white", 
+                        height=500,
+                        xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
+                    )
                     st.plotly_chart(fig, use_container_width=True, key=f"multi_{i}_{col_name[:20]}")
             
             # 統計分析 - 複選題
@@ -1672,6 +2070,10 @@ for i, col_name in enumerate(cols_to_analyze):
                         df_pair['phase'] = df_to_analyze.loc[df_pair.index, PHASE_COLUMN_NAME].fillna('未標註階段')
                         pivot = df_pair.groupby(['ans', 'phase']).size().unstack(fill_value=0)
                         
+                        # 智慧排序 x 軸
+                        sorted_index = smart_sort_categories(pivot.index)
+                        pivot = pivot.reindex(sorted_index)
+                        
                         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
                         fig = go.Figure()
                         for j, phase in enumerate(pivot.columns):
@@ -1681,12 +2083,27 @@ for i, col_name in enumerate(cols_to_analyze):
                                 name=str(phase),
                                 marker_color=colors[j % len(colors)]
                             ))
-                        fig.update_layout(barmode='stack', xaxis_tickangle=-45, template="plotly_white", height=500)
+                        fig.update_layout(
+                            barmode='stack', 
+                            xaxis_tickangle=-45, 
+                            template="plotly_white", 
+                            height=500,
+                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
+                        )
                         st.plotly_chart(fig, use_container_width=True, key=f"cat_{i}_{col_name[:20]}")
                     else:
                         st.markdown("##### 📈 長條圖")
-                        fig = go.Figure(data=[go.Bar(x=total['選項'], y=total['次數'])])
-                        fig.update_layout(xaxis_tickangle=-45, template="plotly_white", height=500)
+                        # 智慧排序 x 軸
+                        sorted_index = smart_sort_categories(total['選項'])
+                        total_sorted = total.set_index('選項').reindex(sorted_index).reset_index()
+                        
+                        fig = go.Figure(data=[go.Bar(x=total_sorted['選項'], y=total_sorted['次數'])])
+                        fig.update_layout(
+                            xaxis_tickangle=-45, 
+                            template="plotly_white", 
+                            height=500,
+                            xaxis={'categoryorder': 'array', 'categoryarray': sorted_index}
+                        )
                         st.plotly_chart(fig, use_container_width=True, key=f"cat_{i}_{col_name[:20]}")
                 
                 # 統計分析 - 類別題
