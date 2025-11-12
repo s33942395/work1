@@ -9,6 +9,8 @@ from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, fisher_exact
 from datetime import datetime
 import io
 from difflib import SequenceMatcher
+from professional_report_enhanced import generate_government_style_report
+from descriptive_report_generator import generate_full_descriptive_report
 
 warnings.filterwarnings('ignore')
 
@@ -73,25 +75,116 @@ def smart_sort_categories(categories):
             stage_num = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '1': 1, '2': 2, '3': 3, '4': 4}.get(stage_match.group(1), 0)
             return (6, stage_num)
         
-        # 8. 處理程度 (完全沒有, 部分有, 完全有)
-        degree_order = {
-            '完全沒有': 1, '沒有': 1, '無': 1,
-            '極少': 2, '很少': 2,
-            '部分': 3, '部分有': 3, '部份': 3,
-            '大部分': 4, '大部分有': 4,
-            '完全': 5, '完全有': 5, '有': 5, '是': 5
+        # 8. 處理中文程度詞（完整的五級量表和各種變體）
+        degree_patterns = {
+            # === 否定程度（1-2分）===
+            '非常不': 1.0,
+            '極不': 1.0,
+            '完全不': 1.0,
+            '絕對不': 1.0,
+            '非常不同意': 1.0,
+            '非常不滿意': 1.0,
+            '非常不重要': 1.0,
+            '非常不符合': 1.0,
+            
+            '不': 2.0,
+            '不同意': 2.0,
+            '不滿意': 2.0,
+            '不重要': 2.0,
+            '不符合': 2.0,
+            '沒有': 2.0,
+            '無': 2.0,
+            '較不': 2.0,
+            '有點不': 2.0,
+            
+            # === 中立程度（3分）===
+            '普通': 3.0,
+            '中立': 3.0,
+            '一般': 3.0,
+            '還好': 3.0,
+            '尚可': 3.0,
+            '中等': 3.0,
+            '部分': 3.0,
+            '有時': 3.0,
+            '偶爾': 3.0,
+            
+            # === 肯定程度（4-5分）===
+            '同意': 4.0,
+            '滿意': 4.0,
+            '重要': 4.0,
+            '符合': 4.0,
+            '有': 4.0,
+            '是': 4.0,
+            '大部分': 4.0,
+            '大多': 4.0,
+            '較': 4.0,
+            '相當': 4.0,
+            '算': 4.0,
+            
+            '非常': 5.0,
+            '非常同意': 5.0,
+            '非常滿意': 5.0,
+            '非常重要': 5.0,
+            '非常符合': 5.0,
+            '極': 5.0,
+            '極為': 5.0,
+            '完全': 5.0,
+            '完全同意': 5.0,
+            '絕對': 5.0,
+            '最': 5.0,
+            
+            # === 特殊處理：程度副詞 + 形容詞 ===
+            '非常低': 1.0,
+            '很低': 2.0,
+            '低': 2.0,
+            '偏低': 2.5,
+            '中': 3.0,
+            '中等': 3.0,
+            '偏高': 3.5,
+            '高': 4.0,
+            '很高': 4.5,
+            '非常高': 5.0,
+            
+            # === 頻率相關 ===
+            '從不': 1.0,
+            '很少': 2.0,
+            '極少': 2.0,
+            '偶爾': 3.0,
+            '有時': 3.0,
+            '經常': 4.0,
+            '常常': 4.0,
+            '總是': 5.0,
+            '一直': 5.0,
+            '始終': 5.0,
         }
-        for key, value in degree_order.items():
+        
+        # 精確匹配（優先處理複合詞）
+        for pattern, score in sorted(degree_patterns.items(), key=lambda x: len(x[0]), reverse=True):
+            if pattern in item_str:
+                return (7, score)
+        
+        # 9. 處理「完全沒有」到「完全有」的具體變體
+        completion_order = {
+            '完全沒有': 1,
+            '大部分沒有': 2,
+            '部分沒有': 2.5,
+            '部分': 3,
+            '部分有': 3.5,
+            '大部分有': 4,
+            '完全有': 5,
+            '完全': 5
+        }
+        for key, value in completion_order.items():
             if key in item_str:
                 return (7, value)
         
-        # 9. 處理比較級 (低於, 符合, 高於)
+        # 10. 處理比較級 (低於, 符合, 高於)
         compare_order = {'低於': 1, '低': 1, '符合': 2, '相當': 2, '高於': 3, '高': 3, '超過': 3}
         for key, value in compare_order.items():
             if key in item_str:
                 return (8, value)
         
-        # 10. 處理純數字開頭
+        # 11. 處理純數字開頭
         num_match = re.match(r'^(\d+\.?\d*)', item_str)
         if num_match:
             return (9, float(num_match.group(1)))
@@ -1906,29 +1999,94 @@ if analysis_mode == '合併分析':
     else:
         st.warning("未找到具有顯著差異的題目")
     
-    # === 新增：專業報告生成 ===
+    # === 新增:專業報告生成 ===
     if recommendations:
         st.markdown("---")
         st.markdown("### 📄 專業分析報告生成")
-        st.info("✨ 為國發基金量身打造的專業分析報告，採用「執行摘要 → 方法論 → 主要發現 → 結論與建議」結構")
         
-        if st.button("📊 生成完整分析報告", type="primary"):
-            with st.spinner("正在生成專業報告..."):
-                # 生成報告內容
-                report = generate_professional_report(df_to_analyze, recommendations, cols_to_analyze, analysis_mode)
-                
-                # 顯示報告
-                st.markdown("---")
-                st.markdown(report, unsafe_allow_html=True)
-                
-                # 提供下載選項
-                st.markdown("---")
-                st.download_button(
-                    label="💾 下載報告（Markdown 格式）",
-                    data=report,
-                    file_name=f"未上市櫃公司治理問卷分析報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                    mime="text/markdown"
-                )
+        # 報告樣式選擇
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info("✨ 為國發基金量身打造的專業分析報告")
+        with col2:
+            report_style = st.selectbox(
+                "報告格式",
+                ["政府統計報告格式", "標準業務報告"],
+                help="政府統計報告格式：參考臺北市政府警察局統計室專業報告結構\n標準業務報告：原有的執行摘要格式"
+            )
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("📊 生成完整分析報告（新格式）", type="primary", use_container_width=True):
+                with st.spinner("正在生成專業統計報告..."):
+                    # 生成新格式報告
+                    report = generate_government_style_report(df_to_analyze, recommendations, cols_to_analyze, analysis_mode)
+                    
+                    # 顯示報告
+                    st.markdown("---")
+                    st.markdown(report, unsafe_allow_html=True)
+                    
+                    # 提供下載選項
+                    st.markdown("---")
+                    st.download_button(
+                        label="💾 下載報告（政府格式）",
+                        data=report,
+                        file_name=f"統計應用分析報告_未上市櫃公司治理_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                        mime="text/markdown"
+                    )
+        
+        with col_b:
+            if st.button("📋 生成標準報告（原格式）", use_container_width=True):
+                with st.spinner("正在生成業務報告..."):
+                    # 生成原有格式報告
+                    report = generate_professional_report(df_to_analyze, recommendations, cols_to_analyze, analysis_mode)
+                    
+                    # 顯示報告
+                    st.markdown("---")
+                    st.markdown(report, unsafe_allow_html=True)
+                    
+                    # 提供下載選項
+                    st.markdown("---")
+                    st.download_button(
+                        label="💾 下載報告（標準格式）",
+                        data=report,
+                        file_name=f"公司治理問卷分析報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                        mime="text/markdown"
+                    )
+        
+        # === 新增：描述性統計報告（Word 格式）===
+        st.markdown("---")
+        st.markdown("### 📄 描述性統計報告（Word 格式）")
+        st.info("✨ 配合原始 docx 格式，包含表格、統計檢定、業務解讀，輸出為 Word 文件")
+        
+        if st.button("📝 生成描述性統計報告（Word）", type="primary", use_container_width=True):
+            with st.spinner("正在生成 Word 報告..."):
+                try:
+                    # 生成 Word 報告
+                    output_path = generate_full_descriptive_report(
+                        df_to_analyze,
+                        output_path="/workspaces/work1/問卷描述性統計報告_完整版.docx"
+                    )
+                    
+                    # 讀取檔案供下載
+                    with open(output_path, "rb") as file:
+                        docx_bytes = file.read()
+                    
+                    st.success("✅ Word 報告生成成功！")
+                    
+                    # 提供下載按鈕
+                    st.download_button(
+                        label="💾 下載 Word 報告",
+                        data=docx_bytes,
+                        file_name=f"問卷描述性統計報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                    
+                    st.info("📊 報告包含：\n- 樣本分佈統計表\n- 公司方 vs 投資方比較\n- 階段分析\n- 統計檢定結果\n- 業務意涵解讀")
+                    
+                except Exception as e:
+                    st.error(f"❌ 生成報告時發生錯誤：{str(e)}")
+                    st.exception(e)
 
 # --- 題目顯示區 ---
 st.markdown("---")
