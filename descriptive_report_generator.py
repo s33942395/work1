@@ -283,32 +283,36 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     add_heading_with_style(doc, '(一) 核心議題選定說明', level=2)
     
     doc.add_paragraph(
-        '本報告從問卷中精選 10 個核心議題進行深入分析，涵蓋未上市櫃公司治理的五大關鍵面向。'
+        '本報告從問卷中精選 20 個核心議題進行深入分析，涵蓋未上市櫃公司治理的六大關鍵面向。'
         '這些議題的選擇係基於公司治理理論與實務的重要性，以及對投資人決策與公司永續發展的影響程度。'
     )
     
     doc.add_paragraph()
-    doc.add_paragraph('【五大關鍵面向】', style='Heading 4')
+    doc.add_paragraph('【六大關鍵面向】', style='Heading 4')
     
     dimension_para = doc.add_paragraph()
     dimension_para.add_run('1. 股權結構與控制權（2題）：').bold = True
     dimension_para.add_run('股權集中度與經營團隊持股是公司治理的基礎，直接影響決策效率與代理問題。')
     
     dimension_para = doc.add_paragraph()
-    dimension_para.add_run('2. 董事會治理機制（3題）：').bold = True
-    dimension_para.add_run('董事會的決策透明度、利益迴避機制與專業多元性，是確保公司決策品質的核心要素。')
+    dimension_para.add_run('2. 股東會治理（3題）：').bold = True
+    dimension_para.add_run('股東會的通知時效、決議記錄與董事出席情況，是保障股東權益的基本機制。')
     
     dimension_para = doc.add_paragraph()
-    dimension_para.add_run('3. 財務報告與資訊透明度（3題）：').bold = True
-    dimension_para.add_run('外部查核、定期報告與股權資訊揭露是投資人監督管理層的重要基礎。')
+    dimension_para.add_run('3. 董事會治理機制（5題）：').bold = True
+    dimension_para.add_run('董事會的議程通知、決議記錄、召集程序、議事內容與開會頻率，是確保董事會有效運作的核心要素。')
     
     dimension_para = doc.add_paragraph()
-    dimension_para.add_run('4. 內部控制（1題）：').bold = True
-    dimension_para.add_run('財務職能分工是未上市櫃公司最基本但最關鍵的內控機制，有效防範舞弊風險。')
+    dimension_para.add_run('4. 財務報告與資訊透明度（5題）：').bold = True
+    dimension_para.add_run('外部專業諮詢、財務查核、股權揭露、業務報告與財務報告頻率，是投資人監督管理層的重要基礎。')
     
     dimension_para = doc.add_paragraph()
-    dimension_para.add_run('5. 利害關係人治理（1題）：').bold = True
-    dimension_para.add_run('員工激勵制度反映公司對人力資本的重視，是企業永續經營的關鍵因素。')
+    dimension_para.add_run('5. 內部控制與風險管理（3題）：').bold = True
+    dimension_para.add_run('財務職能分工、財務紀錄處理與智慧財產權保護，是未上市櫃公司內部控制的基本要求。')
+    
+    dimension_para = doc.add_paragraph()
+    dimension_para.add_run('6. 利害關係人治理（2題）：').bold = True
+    dimension_para.add_run('員工激勵制度與利害關係人溝通機制，反映公司對人力資本與多方協作的重視程度。')
     
     doc.add_paragraph()
     doc.add_paragraph(
@@ -330,6 +334,8 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
     新增單一議題的完整分析
     包含：標題、描述、表格、圖表、統計檢定、業務解讀
     即使統計檢定沒過也提供詳細敘述
+    
+    注意：如果df沒有'respondent_type'欄位，則只做整體分析，不做公司方vs投資方比較
     """
     
     add_heading_with_style(doc, topic_title, level=2)
@@ -338,22 +344,42 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
         para = doc.add_paragraph(topic_description)
         para.runs[0].font.size = Pt(11)
     
-    # (一) 公司方與投資方比較
-    add_heading_with_style(doc, '(一) 公司方與投資方比較', level=3)
+    # (一) 公司方與投資方比較（如果有respondent_type欄位）
+    if 'respondent_type' in df.columns:
+        add_heading_with_style(doc, '(一) 公司方與投資方比較', level=3)
+    else:
+        add_heading_with_style(doc, '(一) 整體分佈情況', level=3)
     
-    if 'respondent_type' in df.columns and topic_col in df.columns:
-        # 清理資料
+    if topic_col not in df.columns:
+        doc.add_paragraph('本題目不存在於資料中。')
+        return doc
+    
+    # 清理資料
+    if 'respondent_type' in df.columns:
         df_clean = df[[topic_col, 'respondent_type']].dropna()
-        
-        if len(df_clean) == 0:
-            doc.add_paragraph('本題目無有效樣本資料。')
-            return doc
-        
-        # 計算分佈
+    else:
+        df_clean = df[[topic_col]].dropna()
+    
+    if len(df_clean) == 0:
+        doc.add_paragraph('本題目無有效樣本資料。')
+        return doc
+    
+    # 計算分佈
+    if 'respondent_type' in df.columns:
         crosstab = pd.crosstab(df_clean[topic_col], df_clean['respondent_type'], margins=True)
         crosstab_pct = pd.crosstab(df_clean[topic_col], df_clean['respondent_type'], normalize='columns') * 100
-        
-        # 生成表格
+    else:
+        # 只計算整體分佈
+        value_counts = df_clean[topic_col].value_counts()
+        total_count = len(df_clean)
+        crosstab = pd.DataFrame({
+            '次數': value_counts,
+            '百分比': (value_counts / total_count * 100).round(1)
+        })
+        crosstab.loc['合計'] = [total_count, 100.0]
+    
+    # 生成表格
+    if 'respondent_type' in df.columns:
         table_data = {
             'columns': ['選項', '公司方人數', '公司方百分比', '投資方人數', '投資方百分比', '合計'],
             'data': []
@@ -425,6 +451,72 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
         
         # 統計檢定
         chi_result = calculate_chi_square(df_clean, topic_col, 'respondent_type')
+    else:
+        # 只有整體分佈，沒有公司方vs投資方比較
+        table_data = {
+            'columns': ['選項', '次數', '百分比'],
+            'data': []
+        }
+        
+        for idx in crosstab.index:
+            if idx != '合計':
+                table_data['data'].append([
+                    str(idx),
+                    int(crosstab.loc[idx, '次數']),
+                    f"{crosstab.loc[idx, '百分比']:.1f}%"
+                ])
+        
+        # 合計行
+        table_data['data'].append([
+            '合計',
+            int(crosstab.loc['合計', '次數']),
+            f"{crosstab.loc['合計', '百分比']:.1f}%"
+        ])
+        
+        add_statistics_table(doc, table_data, title=f"{topic_title} - 整體分佈表")
+        
+        # === 加入圓餅圖 ===
+        doc.add_paragraph()
+        doc.add_paragraph('【圖表呈現】', style='Heading 4')
+        
+        try:
+            # 獲取所有類別（排除 '合計'）
+            categories = [idx for idx in crosstab.index if idx != '合計']
+            values = [crosstab.loc[idx, '次數'] for idx in categories]
+            
+            # 創建圓餅圖
+            fig = go.Figure(data=[go.Pie(labels=categories, values=values, hole=0.3)])
+            fig.update_layout(
+                title=f"{topic_title} - 整體分佈",
+                font=dict(family="Microsoft YaHei, Arial", size=12)
+            )
+            
+            # 儲存圖片
+            chart_filename = f"/tmp/chart_{hash(topic_title)}.png"
+            if save_plotly_as_image(fig, chart_filename):
+                # 將圖片插入 Word 文件
+                doc.add_picture(chart_filename, width=Inches(5))
+                # 圖片置中
+                last_paragraph = doc.paragraphs[-1]
+                last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                doc.add_paragraph()
+                
+                # 清理臨時檔案
+                try:
+                    os.remove(chart_filename)
+                except:
+                    pass
+            else:
+                doc.add_paragraph('（圖表生成失敗）')
+        except Exception as e:
+            print(f"圖表插入失敗: {e}")
+            doc.add_paragraph(f'（圖表生成時發生錯誤）')
+        
+        # 無法做公司方vs投資方的統計檢定
+        chi_result = None
+    
+    # 統計檢定結果顯示
+    if 'respondent_type' in df.columns:
         
         doc.add_paragraph('【統計檢定】', style='Heading 4')
         
