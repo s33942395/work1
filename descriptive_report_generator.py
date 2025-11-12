@@ -70,11 +70,19 @@ def add_statistics_table(doc, data_dict, title=""):
 def save_plotly_as_image(fig, filename):
     """儲存 Plotly 圖表為圖片（PNG格式）"""
     try:
-        fig.write_image(filename, width=1000, height=600, scale=2)
+        # 嘗試儲存圖表，設定較長的超時時間
+        fig.write_image(filename, width=1000, height=600, scale=2, engine="kaleido")
         return True
     except Exception as e:
         print(f"圖表儲存失敗: {e}")
-        return False
+        # 嘗試使用較低品質設定
+        try:
+            print("嘗試使用較低品質設定...")
+            fig.write_image(filename, width=800, height=500, scale=1, engine="kaleido")
+            return True
+        except Exception as e2:
+            print(f"圖表儲存再次失敗: {e2}")
+            return False
 
 def create_bar_chart(crosstab, crosstab_pct, title, categories):
     """

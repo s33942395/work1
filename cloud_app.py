@@ -2060,38 +2060,60 @@ if analysis_mode == '合併分析':
         st.info("✨ 配合原始 docx 格式，包含表格、統計檢定、業務解讀，輸出為 Word 文件")
         
         if st.button("📝 生成描述性統計報告（Word）", type="primary", use_container_width=True):
-            with st.spinner("正在生成 Word 報告..."):
-                try:
-                    # 使用臨時目錄生成 Word 報告
-                    import tempfile
-                    import os
-                    temp_dir = tempfile.gettempdir()
-                    output_path = os.path.join(temp_dir, "問卷描述性統計報告_完整版.docx")
-                    
-                    # 生成 Word 報告
-                    output_path = generate_full_descriptive_report(
-                        df_to_analyze,
-                        output_path=output_path
-                    )
-                    
-                    # 讀取檔案供下載
-                    with open(output_path, "rb") as file:
-                        docx_bytes = file.read()
-                    
-                    st.success("✅ Word 報告生成成功！")
-                    
-                    # 提供下載按鈕
-                    st.download_button(
-                        label="💾 下載 Word 報告",
-                        data=docx_bytes,
-                        file_name=f"問卷描述性統計報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-                    
-                    st.info("📊 報告包含：\n- 樣本分佈統計表\n- 公司方 vs 投資方比較\n- 階段分析\n- 統計檢定結果\n- 業務意涵解讀")
-                    
-                except Exception as e:
-                    st.error(f"❌ 生成報告時發生錯誤：{str(e)}")
+            try:
+                # 使用臨時目錄生成 Word 報告
+                import tempfile
+                import os
+                temp_dir = tempfile.gettempdir()
+                output_path = os.path.join(temp_dir, "問卷描述性統計報告_完整版.docx")
+                
+                # 顯示進度
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                
+                progress_text.text("📝 正在初始化報告...")
+                progress_bar.progress(10)
+                
+                # 生成 Word 報告
+                progress_text.text("📊 正在分析數據並生成表格...")
+                progress_bar.progress(30)
+                
+                output_path = generate_full_descriptive_report(
+                    df_to_analyze,
+                    output_path=output_path
+                )
+                
+                progress_text.text("📈 正在生成圖表...")
+                progress_bar.progress(70)
+                
+                # 讀取檔案供下載
+                with open(output_path, "rb") as file:
+                    docx_bytes = file.read()
+                
+                progress_text.text("✅ 報告生成完成！")
+                progress_bar.progress(100)
+                
+                st.success("✅ Word 報告生成成功！")
+                
+                # 清除進度顯示
+                progress_text.empty()
+                progress_bar.empty()
+                
+                # 提供下載按鈕
+                st.download_button(
+                    label="💾 下載 Word 報告",
+                    data=docx_bytes,
+                    file_name=f"問卷描述性統計報告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="download_word_report"
+                )
+                
+                st.info("📊 報告包含：\n- 樣本分佈統計表\n- 公司方 vs 投資方比較\n- 階段分析\n- 統計檢定結果\n- 業務意涵解讀\n- 📈 長條圖視覺化")
+                
+            except Exception as e:
+                st.error(f"❌ 生成報告時發生錯誤：{str(e)}")
+                st.warning("請確認：\n1. 已上傳正確的 CSV 檔案\n2. 檔案包含必要的欄位\n3. 網路連線正常")
+                with st.expander("🔍 詳細錯誤訊息"):
                     st.exception(e)
 
 # --- 題目顯示區 ---
