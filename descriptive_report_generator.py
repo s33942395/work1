@@ -86,48 +86,50 @@ def save_plotly_as_image(fig, filename):
 
 def create_bar_chart(crosstab, crosstab_pct, title, categories):
     """
-    創建長條圖（公司方 vs 投資方比較）
+    創建長條圖（公司方 vs 投資方比較）- 使用與 cloud_app.py 一致的樣式
+    Y 軸顯示百分比數值
     """
     fig = go.Figure()
     
-    # 公司方數據
+    # 使用與 app 一致的配色方案
+    colors = {'公司方': '#1f77b4', '投資方': '#ff7f0e'}
+    
+    # 公司方數據 - 使用百分比作為 Y 軸
     if '公司方' in crosstab.columns:
-        company_values = [crosstab.loc[cat, '公司方'] if cat in crosstab.index else 0 for cat in categories]
         company_pct = [crosstab_pct.loc[cat, '公司方'] if cat in crosstab_pct.index else 0 for cat in categories]
         
         fig.add_trace(go.Bar(
             name='公司方',
             x=categories,
-            y=company_values,
-            text=[f'{v}<br>({p:.1f}%)' for v, p in zip(company_values, company_pct)],
-            textposition='auto',
-            marker_color='rgb(55, 83, 109)'
+            y=company_pct,
+            marker_color=colors['公司方'],
+            text=[f"{p:.1f}%" for p in company_pct],
+            textposition='auto'
         ))
     
-    # 投資方數據
+    # 投資方數據 - 使用百分比作為 Y 軸
     if '投資方' in crosstab.columns:
-        investor_values = [crosstab.loc[cat, '投資方'] if cat in crosstab.index else 0 for cat in categories]
         investor_pct = [crosstab_pct.loc[cat, '投資方'] if cat in crosstab_pct.index else 0 for cat in categories]
         
         fig.add_trace(go.Bar(
             name='投資方',
             x=categories,
-            y=investor_values,
-            text=[f'{v}<br>({p:.1f}%)' for v, p in zip(investor_values, investor_pct)],
-            textposition='auto',
-            marker_color='rgb(26, 118, 255)'
+            y=investor_pct,
+            marker_color=colors['投資方'],
+            text=[f"{p:.1f}%" for p in investor_pct],
+            textposition='auto'
         ))
     
     fig.update_layout(
-        title=dict(text=title, font=dict(size=16, family='Microsoft JhengHei')),
-        xaxis=dict(title='', tickfont=dict(size=11, family='Microsoft JhengHei')),
-        yaxis=dict(title='人數', tickfont=dict(size=11)),
         barmode='group',
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(family='Microsoft JhengHei'),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        title='各選項在不同身分的選擇比例',
+        xaxis_title='選項',
+        yaxis_title='比例 (%)',
+        template='plotly_white',
+        height=500,
+        xaxis_tickangle=-45,
+        xaxis={'categoryorder': 'array', 'categoryarray': categories},
+        font=dict(family='Microsoft JhengHei')
     )
     
     return fig
@@ -485,23 +487,24 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
             values = [crosstab.loc[idx, '次數'] for idx in categories]
             percentages = [crosstab.loc[idx, '百分比'] for idx in categories]
             
-            # 創建長條圖（改用已驗證可正確顯示中文的長條圖）
+            # 創建長條圖（使用與 cloud_app.py 一致的樣式）
             fig = go.Figure()
             fig.add_trace(go.Bar(
                 x=categories,
-                y=values,
-                text=[f'{v}人<br>({p:.1f}%)' for v, p in zip(values, percentages)],
-                textposition='outside',
-                marker_color='lightblue'
+                y=percentages,
+                marker_color='#1f77b4',
+                text=[f"{p:.1f}%" for p in percentages],
+                textposition='auto'
             ))
             
             fig.update_layout(
-                title=dict(text=f"{topic_title} - 整體分佈", font=dict(size=16, family='Microsoft JhengHei')),
-                xaxis=dict(title='', tickfont=dict(size=11, family='Microsoft JhengHei')),
-                yaxis=dict(title='人數', tickfont=dict(size=11)),
+                title='整體選項分佈',
+                xaxis_title='選項',
+                yaxis_title='比例 (%)',
+                template='plotly_white',
+                height=500,
+                xaxis_tickangle=-45,
                 showlegend=False,
-                height=400,
-                margin=dict(t=80, b=100),
                 font=dict(family='Microsoft JhengHei')
             )
             
