@@ -14,6 +14,78 @@ import plotly.express as px
 from io import BytesIO
 from datetime import datetime
 import os
+import re
+
+def smart_sort_categories(categories):
+    """
+    智慧排序類別資料 - 與 cloud_app.py 完全一致
+    處理百分比、數值範圍、階段、是否等特殊格式
+    """
+    if len(categories) == 0:
+        return []
+    
+    categories_list = list(categories)
+    
+    def sort_key(item):
+        item_str = str(item).strip()
+        
+        # 1. 百分比範圍
+        percent_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[%％]', item_str)
+        if percent_match:
+            return (0, float(percent_match.group(1)))
+        
+        single_percent = re.match(r'(\d+\.?\d*)\s*[%％]', item_str)
+        if single_percent:
+            return (0, float(single_percent.group(1)))
+        
+        # 2. 年份範圍
+        year_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*年', item_str)
+        if year_match:
+            return (1, float(year_match.group(1)))
+        
+        # 3. 金額範圍
+        money_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*[萬億]', item_str)
+        if money_match:
+            return (2, float(money_match.group(1)))
+        
+        # 4. 月份範圍
+        month_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*個?月', item_str)
+        if month_match:
+            return (3, float(month_match.group(1)))
+        
+        # 5. 人數範圍
+        people_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*人', item_str)
+        if people_match:
+            return (4, float(people_match.group(1)))
+        
+        # 6. 頻率
+        freq_order = {'每週': 1, '每月': 2, '每季': 3, '每半年': 4, '每年': 5, '不定期': 6, '無': 7}
+        for key, value in freq_order.items():
+            if key in item_str:
+                return (5, value)
+        
+        # 7. 階段
+        if '第一階段' in item_str or '階段1' in item_str:
+            return (6, 1)
+        if '第二階段' in item_str or '階段2' in item_str:
+            return (6, 2)
+        if '第三階段' in item_str or '階段3' in item_str:
+            return (6, 3)
+        
+        # 8. 是/否
+        if item_str in ['是', 'Yes', 'yes', '有']:
+            return (7, 1)
+        if item_str in ['否', 'No', 'no', '無']:
+            return (7, 2)
+        
+        # 9. 一般文字
+        return (10, item_str)
+    
+    try:
+        sorted_list = sorted(categories_list, key=sort_key)
+        return sorted_list
+    except:
+        return categories_list
 
 def add_heading_with_style(doc, text, level=1):
     """新增標題並設定樣式"""
@@ -86,21 +158,28 @@ def save_plotly_as_image(fig, filename):
 
 def create_bar_chart(crosstab, crosstab_pct, title, categories):
     """
-    創建長條圖（公司方 vs 投資方比較）- 使用與 cloud_app.py 一致的樣式
-    Y 軸顯示百分比數值
+    創建長條圖（公司方 vs 投資方比較）- 與 cloud_app.py 完全一致
+    使用智慧排序、plotly_white 模板、正確配色
     """
+    # 智慧排序 X 軸
+    sorted_categories = smart_sort_categories(categories)
+    
+    # 重新排序數據
+    crosstab_sorted = crosstab.reindex(sorted_categories)
+    crosstab_pct_sorted = crosstab_pct.reindex(sorted_categories)
+    
     fig = go.Figure()
     
     # 使用與 app 一致的配色方案
-    colors = {'公司方': '#1f77b4', '投資方': '#ff7f0e'}
+    colors = {'公司方': '#1f77b4', '投資方': '#ff7f0e', '未知': '#999999'}
     
     # 公司方數據 - 使用百分比作為 Y 軸
-    if '公司方' in crosstab.columns:
-        company_pct = [crosstab_pct.loc[cat, '公司方'] if cat in crosstab_pct.index else 0 for cat in categories]
+    if '公司方' in crosstab_pct_sorted.columns:
+        company_pct = crosstab_pct_sorted['公司方'].values
         
         fig.add_trace(go.Bar(
             name='公司方',
-            x=categories,
+            x=sorted_categories,
             y=company_pct,
             marker_color=colors['公司方'],
             text=[f"{p:.1f}%" for p in company_pct],
@@ -108,12 +187,12 @@ def create_bar_chart(crosstab, crosstab_pct, title, categories):
         ))
     
     # 投資方數據 - 使用百分比作為 Y 軸
-    if '投資方' in crosstab.columns:
-        investor_pct = [crosstab_pct.loc[cat, '投資方'] if cat in crosstab_pct.index else 0 for cat in categories]
+    if '投資方' in crosstab_pct_sorted.columns:
+        investor_pct = crosstab_pct_sorted['投資方'].values
         
         fig.add_trace(go.Bar(
             name='投資方',
-            x=categories,
+            x=sorted_categories,
             y=investor_pct,
             marker_color=colors['投資方'],
             text=[f"{p:.1f}%" for p in investor_pct],
@@ -128,8 +207,8 @@ def create_bar_chart(crosstab, crosstab_pct, title, categories):
         template='plotly_white',
         height=500,
         xaxis_tickangle=-45,
-        xaxis={'categoryorder': 'array', 'categoryarray': categories},
-        font=dict(family='Microsoft JhengHei')
+        xaxis={'categoryorder': 'array', 'categoryarray': sorted_categories},
+        font=dict(family='Microsoft JhengHei', size=12)
     )
     
     return fig
@@ -484,16 +563,19 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
         try:
             # 獲取所有類別（排除 '合計'）
             categories = [idx for idx in crosstab.index if idx != '合計']
-            values = [crosstab.loc[idx, '次數'] for idx in categories]
             percentages = [crosstab.loc[idx, '百分比'] for idx in categories]
+            
+            # 智慧排序
+            sorted_categories = smart_sort_categories(categories)
+            sorted_percentages = [crosstab.loc[cat, '百分比'] for cat in sorted_categories]
             
             # 創建長條圖（使用與 cloud_app.py 一致的樣式）
             fig = go.Figure()
             fig.add_trace(go.Bar(
-                x=categories,
-                y=percentages,
+                x=sorted_categories,
+                y=sorted_percentages,
                 marker_color='#1f77b4',
-                text=[f"{p:.1f}%" for p in percentages],
+                text=[f"{p:.1f}%" for p in sorted_percentages],
                 textposition='auto'
             ))
             
@@ -504,8 +586,9 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
                 template='plotly_white',
                 height=500,
                 xaxis_tickangle=-45,
+                xaxis={'categoryorder': 'array', 'categoryarray': sorted_categories},
                 showlegend=False,
-                font=dict(family='Microsoft JhengHei')
+                font=dict(family='Microsoft JhengHei', size=12)
             )
             
             # 儲存圖片
