@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore')
 # 設置 Plotly 全局字體配置（支援中文）
 import plotly.io as pio
 pio.templates["plotly_white_cjk"] = pio.templates["plotly_white"]
-pio.templates["plotly_white_cjk"].layout.font.family = "Noto Sans CJK SC, Arial, sans-serif"
+pio.templates["plotly_white_cjk"].layout.font.family = "Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif"
 pio.templates["plotly_white_cjk"].layout.font.size = 12
 pio.templates.default = "plotly_white_cjk"
 
@@ -1686,7 +1686,7 @@ if analysis_mode == '合併分析':
                                             height=500,
                                             xaxis_tickangle=-45,
                                             xaxis={'categoryorder': 'array', 'categoryarray': sorted_index},
-                                            font=dict(family='Noto Sans CJK SC, Arial, sans-serif', size=12)
+                                            font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12)
                                         )
                                         st.plotly_chart(fig, use_container_width=True)
                                         

@@ -222,7 +222,7 @@ def create_bar_chart(crosstab, crosstab_pct, title, categories):
         height=500,
         xaxis_tickangle=-45,
         xaxis={'categoryorder': 'array', 'categoryarray': sorted_categories},
-        font=dict(family='Noto Sans CJK SC, Arial, sans-serif', size=12)
+        font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12)
     )
     
     return fig
@@ -602,7 +602,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
                 xaxis_tickangle=-45,
                 xaxis={'categoryorder': 'array', 'categoryarray': sorted_categories},
                 showlegend=False,
-                font=dict(family='Noto Sans CJK SC, Arial, sans-serif', size=12)
+                font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12)
             )
             
             # 儲存圖片
