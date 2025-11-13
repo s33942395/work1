@@ -109,11 +109,23 @@ def add_heading_with_style(doc, text, level=1):
     heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
     return heading
 
-def add_statistics_table(doc, data_dict, title=""):
+def add_statistics_table(doc, data_dict, title="", table_counter=None):
     """
     新增政府統計風格的完整表格
     包含標題、資料來源、製表單位等資訊
+    table_counter: 如果提供，會自動編號表格
     """
+    # 如果有 table_counter，更新表格編號
+    if table_counter is not None and title:
+        # 如果 title 不包含「表 X」格式，則添加
+        if not re.match(r'^表\s*\d+', title):
+            table_counter['count'] += 1
+            title = f"表 {table_counter['count']}：{title}"
+        else:
+            # 更新現有編號
+            table_counter['count'] += 1
+            title = re.sub(r'^表\s*\d+', f'表 {table_counter["count"]}', title)
+    
     if title:
         # 表格標題（置中）
         title_para = doc.add_paragraph(title)
