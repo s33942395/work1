@@ -301,6 +301,69 @@ def create_horizontal_bar_chart(crosstab, crosstab_pct, title, categories):
     
     return fig
 
+def create_horizontal_phase_chart(phase_crosstab, phase_crosstab_pct, title, categories, phases):
+    """
+    創建水平階段比較長條圖 - 適合長文字標籤
+    使用百分比、專業配色
+    """
+    # 智慧排序（反向以符合圖表習慣）
+    sorted_categories = smart_sort_categories(categories)
+    sorted_categories.reverse()  # 反轉順序，讓最小值在上方
+    
+    # 重新排序數據
+    phase_crosstab_sorted = phase_crosstab.reindex(sorted_categories)
+    phase_crosstab_pct_sorted = phase_crosstab_pct.reindex(sorted_categories)
+    
+    fig = go.Figure()
+    
+    # 專業配色方案（與 app 一致：綠-紅-紫）
+    colors = {
+        '第一階段': '#2ca02c',  # 綠色
+        '第二階段': '#d62728',  # 紅色
+        '第三階段': '#9467bd'   # 紫色
+    }
+    
+    # 智慧排序階段（確保一二三順序）
+    sorted_phases = smart_sort_categories(phases)
+    
+    for phase in sorted_phases:
+        if phase in phase_crosstab_pct_sorted.columns:
+            # 使用百分比作為 X 軸
+            pct_values = phase_crosstab_pct_sorted[phase].values
+            
+            fig.add_trace(go.Bar(
+                name=phase,
+                y=sorted_categories,
+                x=pct_values,
+                orientation='h',
+                marker_color=colors.get(phase, '#cccccc'),
+                text=[f"{p:.1f}%" for p in pct_values],
+                textposition='auto',
+                textfont=dict(size=10)
+            ))
+    
+    fig.update_layout(
+        barmode='group',
+        title=title,
+        xaxis_title='比例 (%)',
+        yaxis_title='選項',
+        template='plotly_white',
+        height=max(400, len(sorted_categories) * 50),  # 動態高度
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12),
+        xaxis=dict(range=[0, 100]),
+        yaxis=dict(automargin=True)
+    )
+    
+    return fig
+
 def create_phase_chart(phase_crosstab, phase_crosstab_pct, title, categories, phases):
     """
     創建階段比較長條圖 - 美化版
@@ -782,8 +845,8 @@ def clean_and_merge_categories(series):
             mapping[val] = standardized
             continue
         
-        # 標準化「不定期」類別
-        if '不定期' in val_str:
+        # 標準化「不定期」類別（處理各種變體）
+        if '不定期' in val_str or '不定期提供' in val_str:
             mapping[val] = '不定期'
             continue
         
@@ -1186,7 +1249,15 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                     
                     # 創建階段比較長條圖 - 使用完整問卷題目
                     chart_title = full_question if full_question else f"{topic_title} - 公司發展階段比較"
-                    fig = create_phase_chart(phase_crosstab, phase_crosstab_pct, chart_title, categories, phases)
+                    
+                    # 檢查標籤長度，決定使用垂直或水平長條圖
+                    avg_label_length = sum(len(str(cat)) for cat in categories) / len(categories) if categories else 0
+                    use_horizontal = avg_label_length > 15 or '議事內容' in topic_title
+                    
+                    if use_horizontal:
+                        fig = create_horizontal_phase_chart(phase_crosstab, phase_crosstab_pct, chart_title, categories, phases)
+                    else:
+                        fig = create_phase_chart(phase_crosstab, phase_crosstab_pct, chart_title, categories, phases)
                     
                     # 儲存圖片
                     chart_filename = f"/tmp/phase_chart_{hash(topic_title)}.png"
