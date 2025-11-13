@@ -229,6 +229,66 @@ def create_bar_chart(crosstab, crosstab_pct, title, categories):
     
     return fig
 
+def create_horizontal_bar_chart(crosstab, crosstab_pct, title, categories):
+    """
+    創建水平長條圖 - 適合長文字標籤
+    使用百分比、專業配色
+    """
+    # 智慧排序（反向以符合圖表習慣，從上到下）
+    sorted_categories = smart_sort_categories(categories)
+    sorted_categories.reverse()  # 反轉順序，讓最小值在上方
+    
+    fig = go.Figure()
+    
+    # 檢查是否有受訪者類型資料
+    if '公司方' in crosstab.columns:
+        # 有公司方和投資方比較
+        company_pct = [crosstab_pct.loc[cat, '公司方'] if cat in crosstab_pct.index else 0 for cat in sorted_categories]
+        investor_pct = [crosstab_pct.loc[cat, '投資方'] if cat in crosstab_pct.index and '投資方' in crosstab_pct.columns else 0 for cat in sorted_categories]
+        
+        fig.add_trace(go.Bar(
+            name='公司方',
+            y=sorted_categories,
+            x=company_pct,
+            orientation='h',
+            marker_color='#1f77b4',
+            text=[f"{p:.1f}%" for p in company_pct],
+            textposition='auto'
+        ))
+        
+        if '投資方' in crosstab.columns:
+            fig.add_trace(go.Bar(
+                name='投資方',
+                y=sorted_categories,
+                x=investor_pct,
+                orientation='h',
+                marker_color='#ff7f0e',
+                text=[f"{p:.1f}%" for p in investor_pct],
+                textposition='auto'
+            ))
+        
+        fig.update_layout(
+            barmode='group',
+            title=title,
+            xaxis_title='比例 (%)',
+            yaxis_title='選項',
+            template='plotly_white',
+            height=max(400, len(sorted_categories) * 40),  # 動態高度
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12),
+            xaxis=dict(range=[0, 100]),
+            yaxis=dict(automargin=True)
+        )
+    
+    return fig
+
 def create_phase_chart(phase_crosstab, phase_crosstab_pct, title, categories, phases):
     """
     創建階段比較長條圖 - 美化版
@@ -683,12 +743,46 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     
     return doc
 
-def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_question=''):
+def clean_and_merge_categories(series):
+    """
+    清理並合併重複的類別（如「50%-67%」和「50%-67(不含)%」）
+    返回標準化後的 Series
+    """
+    # 創建映射字典來標準化類別名稱
+    mapping = {}
+    
+    for val in series.unique():
+        if pd.isna(val):
+            continue
+        val_str = str(val).strip()
+        
+        # 標準化百分比範圍格式
+        # 例如：50%-67% -> 50%-67(不含)%
+        percent_pattern = re.match(r'(\d+\.?\d*)\s*[%％]?\s*[-~到至]\s*(\d+\.?\d*)\s*[%％]', val_str)
+        if percent_pattern:
+            start = percent_pattern.group(1)
+            end = percent_pattern.group(2)
+            standardized = f"{start}%-{end}(不含)%"
+            mapping[val] = standardized
+            continue
+        
+        # 標準化「不定期」類別
+        if '不定期' in val_str:
+            mapping[val] = '不定期'
+            continue
+        
+        # 其他情況保持原樣
+        mapping[val] = val_str
+    
+    return series.map(lambda x: mapping.get(x, x) if pd.notna(x) else x)
+
+def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_question='', table_counter=None):
     """
     新增單一議題的完整分析
     包含：完整題目、描述、表格、圖表、統計檢定、業務解讀
     即使統計檢定沒過也提供詳細敘述
     
+    table_counter: 表格編號計數器
     注意：如果df沒有'respondent_type'欄位，則只做整體分析，不做公司方vs投資方比較
     """
     
@@ -717,11 +811,17 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
         doc.add_paragraph('本題目不存在於資料中。')
         return doc
     
-    # 清理資料
+    # 清理資料並標準化類別
     if 'respondent_type' in df.columns:
-        df_clean = df[[topic_col, 'respondent_type']].dropna()
+        df_clean = df[[topic_col, 'respondent_type']].copy()
+        df_clean = df_clean.dropna(subset=[topic_col])
+        # 標準化類別名稱
+        df_clean[topic_col] = clean_and_merge_categories(df_clean[topic_col])
     else:
-        df_clean = df[[topic_col]].dropna()
+        df_clean = df[[topic_col]].copy()
+        df_clean = df_clean.dropna(subset=[topic_col])
+        # 標準化類別名稱
+        df_clean[topic_col] = clean_and_merge_categories(df_clean[topic_col])
     
     if len(df_clean) == 0:
         doc.add_paragraph('本題目無有效樣本資料。')
@@ -780,7 +880,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
             crosstab.loc['All', 'All']
         ])
         
-        add_statistics_table(doc, table_data, title=f"{topic_title} - 受訪者類型分佈表")
+        add_statistics_table(doc, table_data, title=f"{topic_title} - 受訪者類型分佈表", table_counter=table_counter)
         
         # === 加入長條圖 ===
         doc.add_paragraph()
@@ -790,9 +890,18 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
             # 獲取所有類別（排除 'All'）
             categories = [idx for idx in crosstab.index if idx != 'All']
             
-            # 創建長條圖
+            # 創建長條圖（檢查是否需要水平顯示）
             chart_title = f"{topic_title} - 公司方與投資方比較"
-            fig = create_bar_chart(crosstab, crosstab_pct, chart_title, categories)
+            
+            # 檢查標籤長度，如果平均長度超過15個字元，使用水平長條圖
+            avg_label_length = sum(len(str(cat)) for cat in categories) / len(categories) if categories else 0
+            use_horizontal = avg_label_length > 15 or '議事內容' in topic_title
+            
+            if use_horizontal:
+                # 使用水平長條圖
+                fig = create_horizontal_bar_chart(crosstab, crosstab_pct, chart_title, categories)
+            else:
+                fig = create_bar_chart(crosstab, crosstab_pct, chart_title, categories)
             
             # 儲存圖片
             chart_filename = f"/tmp/chart_{hash(topic_title)}.png"
@@ -815,8 +924,13 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
             print(f"圖表插入失敗: {e}")
             doc.add_paragraph(f'（圖表生成時發生錯誤）')
         
-        # 統計檢定
-        chi_result = calculate_chi_square(df_clean, topic_col, 'respondent_type')
+        # 統計檢定（檢查投資方是否有樣本）
+        investor_count = crosstab.loc['All', '投資方'] if '投資方' in crosstab.columns else 0
+        if investor_count > 0:
+            chi_result = calculate_chi_square(df_clean, topic_col, 'respondent_type')
+        else:
+            # 投資方N=0，無法進行比較統計
+            chi_result = None
     else:
         # 只有整體分佈，沒有公司方vs投資方比較
         table_data = {
@@ -842,7 +956,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
             f"{crosstab.loc['合計', '百分比']:.1f}%"
         ])
         
-        add_statistics_table(doc, table_data, title=f"{topic_title} - 整體分佈表")
+        add_statistics_table(doc, table_data, title=f"{topic_title} - 整體分佈表", table_counter=table_counter)
         
         # === 加入長條圖 ===
         doc.add_paragraph()
@@ -905,10 +1019,13 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
     
     # 統計檢定結果顯示
     if 'respondent_type' in df.columns:
+        # 檢查是否有投資方樣本
+        has_investor_samples = investor_count > 0
         
-        doc.add_paragraph('【統計檢定】', style='Heading 4')
+        if has_investor_samples and chi_result is not None:
+            doc.add_paragraph('【統計檢定】', style='Heading 4')
         
-        if chi_result and chi_result['p_value'] is not None:
+        if has_investor_samples and chi_result and chi_result['p_value'] is not None:
             p = chi_result['p_value']
             
             significance_level = ''
@@ -933,6 +1050,26 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
         # 業務解讀（即使檢定沒過也提供）
         doc.add_paragraph()
         doc.add_paragraph('【業務意涵與解讀】', style='Heading 4')
+        
+        # 如果投資方N=0，提供特別說明
+        if not has_investor_samples:
+            company_total = crosstab.loc['All', '公司方'] if '公司方' in crosstab.columns else 0
+            doc.add_paragraph(
+                f"由於本題僅有公司方（N={int(company_total)}）填答，無投資方樣本可供比較，故僅呈現公司方描述性統計。"
+            )
+            # 從公司方數據分析
+            if '公司方' in crosstab_pct.columns and len(crosstab_pct) > 1:
+                company_top = crosstab_pct['公司方'].idxmax()
+                company_top_pct = crosstab_pct.loc[company_top, '公司方']
+                # 找出前三名
+                top_3 = crosstab_pct['公司方'].nlargest(3)
+                top_3_desc = '、'.join([f"「{idx}」（{val:.1f}%）" for idx, val in top_3.items()])
+                doc.add_paragraph(
+                    f"從公司方數據來看，選擇比例最高的是「{company_top}」（{company_top_pct:.1f}%）。"
+                    f"整體分佈顯示前三名依序為：{top_3_desc}。"
+                    f"此結果反映未上市櫃公司在本議題上的實際現況與主要實務做法。"
+                )
+            return doc
         
         # 計算各類別最高佔比
         if '公司方' in crosstab.columns and '投資方' in crosstab.columns:
@@ -1021,7 +1158,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                 total_row.append(phase_crosstab.loc['All', 'All'])
                 table_data['data'].append(total_row)
                 
-                add_statistics_table(doc, table_data, title=f"{topic_title} - 公司發展階段分佈表")
+                add_statistics_table(doc, table_data, title=f"{topic_title} - 公司發展階段分佈表", table_counter=table_counter)
                 
                 # === 加入階段比較長條圖 ===
                 doc.add_paragraph()
@@ -1337,8 +1474,8 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
                 print("從檔案名推斷 phase")
                 phase_added = True
     
-    # 創建基礎文件
-    doc = generate_descriptive_report_word(df, output_path)
+    # 創建基礎文件並獲取 table_counter
+    doc, table_counter = generate_descriptive_report_word(df, output_path)
     
     # 定義要分析的議題（擴展到20個核心重要議題）
     # 涵蓋：股權結構、董事會治理、資訊揭露、內部控制、利害關係人等五大面向
@@ -1488,7 +1625,8 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
                     topic['col'], 
                     topic['title'], 
                     topic['description'],
-                    full_question=topic.get('question', '')
+                    full_question=topic.get('question', ''),
+                    table_counter=table_counter
                 )
                 analyzed_count += 1
             except Exception as e:
