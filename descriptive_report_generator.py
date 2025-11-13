@@ -8,13 +8,15 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 import pandas as pd
 import numpy as np
-from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, fisher_exact
+from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, fisher_exact, f_oneway
 import plotly.graph_objects as go
 import plotly.express as px
 from io import BytesIO
 from datetime import datetime
 import os
 import re
+import warnings
+warnings.filterwarnings('ignore')
 
 def smart_sort_categories(categories):
     """
@@ -229,36 +231,66 @@ def create_bar_chart(crosstab, crosstab_pct, title, categories):
 
 def create_phase_chart(phase_crosstab, phase_crosstab_pct, title, categories, phases):
     """
-    創建階段比較長條圖
+    創建階段比較長條圖 - 美化版
+    使用百分比、專業配色、垂直 Y 軸標籤
     """
+    # 智慧排序 X 軸
+    sorted_categories = smart_sort_categories(categories)
+    
+    # 重新排序數據
+    phase_crosstab_sorted = phase_crosstab.reindex(sorted_categories)
+    phase_crosstab_pct_sorted = phase_crosstab_pct.reindex(sorted_categories)
+    
     fig = go.Figure()
     
-    colors = ['rgb(55, 83, 109)', 'rgb(26, 118, 255)', 'rgb(50, 171, 96)']
+    # 專業配色方案（與 app 一致：綠-紅-紫）
+    colors = {
+        '第一階段': '#2ca02c',  # 綠色
+        '第二階段': '#d62728',  # 紅色
+        '第三階段': '#9467bd'   # 紫色
+    }
     
-    for i, phase in enumerate(phases):
-        if phase in phase_crosstab.columns:
-            values = [phase_crosstab.loc[cat, phase] if cat in phase_crosstab.index else 0 for cat in categories]
-            pct = [phase_crosstab_pct.loc[cat, phase] if cat in phase_crosstab_pct.index else 0 for cat in categories]
+    for phase in phases:
+        if phase in phase_crosstab_pct_sorted.columns:
+            # 使用百分比作為 Y 軸
+            pct_values = phase_crosstab_pct_sorted[phase].values
             
             fig.add_trace(go.Bar(
                 name=phase,
-                x=categories,
-                y=values,
-                text=[f'{v}<br>({p:.1f}%)' for v, p in zip(values, pct)],
-                textposition='auto',
-                marker_color=colors[i % len(colors)]
+                x=sorted_categories,
+                y=pct_values,
+                marker_color=colors.get(phase, '#cccccc'),
+                text=[f"{p:.1f}%" for p in pct_values],
+                textposition='outside',
+                textfont=dict(size=10)
             ))
     
     fig.update_layout(
-        title=dict(text=title, font=dict(size=16, family='Microsoft JhengHei')),
-        xaxis=dict(title='', tickfont=dict(size=11, family='Microsoft JhengHei')),
-        yaxis=dict(title='人數', tickfont=dict(size=11)),
         barmode='group',
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(family='Microsoft JhengHei'),
+        title=title,  # 使用傳入的完整題目
+        xaxis_title='選項',
+        yaxis_title='比例 (%)',
+        template='plotly_white',
+        height=500,
+        xaxis_tickangle=0,  # X 軸標籤水平顯示
+        xaxis={'categoryorder': 'array', 'categoryarray': sorted_categories},
+        yaxis=dict(
+            title=dict(
+                text='比例 (%)',
+                standoff=15
+            ),
+            tickfont=dict(size=11),
+            tickangle=-90  # Y 軸刻度數字垂直顯示
+        ),
+        font=dict(family='Noto Sans CJK SC, WenQuanYi Micro Hei, sans-serif', size=12),
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
     
     return fig
@@ -293,62 +325,225 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), '微軟正黑體')
     
     # === 封面 ===
-    title = doc.add_heading('問卷描述性統計報告', level=0)
+    title = doc.add_heading('未上市櫃公司治理問卷調查', level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.runs[0].font.size = Pt(22)
+    title.runs[0].font.bold = True
     
-    subtitle = doc.add_paragraph('未上市櫃公司治理問卷分析')
+    subtitle = doc.add_paragraph('描述性統計分析報告')
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle.runs[0].font.size = Pt(16)
+    subtitle.runs[0].font.size = Pt(18)
     
     doc.add_paragraph()
-    date_para = doc.add_paragraph(f'報告日期：{datetime.now().strftime("%Y年%m月%d日")}')
+    doc.add_paragraph()
+    
+    # 執行單位
+    org_para = doc.add_paragraph('執行單位：國家發展委員會')
+    org_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    org_para.runs[0].font.size = Pt(14)
+    
+    doc.add_paragraph()
+    date_para = doc.add_paragraph(f'中華民國 {datetime.now().year - 1911} 年 {datetime.now().month} 月')
     date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date_para.runs[0].font.size = Pt(14)
     
     doc.add_page_break()
     
-    # === 1. 問卷分析 ===
-    add_heading_with_style(doc, '一、問卷分析', level=1)
+    # === 摘要 ===
+    add_heading_with_style(doc, '摘要', level=1)
     
-    p1 = doc.add_paragraph(
-        '本計畫旨在深入探討未上市（櫃）公司在公司治理方面的現況，調查範圍涵蓋未上市（櫃）'
-        '公司及其投資人，涉及多個產業領域與三個不同發展階段。透過多元且豐富的基礎資料，'
-        '期望為不同階段的未上市（櫃）公司在公司治理方面提供具體洞察與實務建議。'
+    abstract_text = (
+        '本研究旨在瞭解未上市（櫃）公司治理現況，透過問卷調查方式，'
+        '蒐集公司方與投資方對公司治理實踐之觀點。調查對象包含處於不同發展階段之未上市（櫃）公司，'
+        '涵蓋第一階段（創業天使投資方案）、第二階段（加強投資中小企業方案等）'
+        '及第三階段（直接投資方案）共三個階段。'
+        '\n\n'
+        f'本次調查共回收有效問卷 {len(df)} 份，其中公司方 {len(df[df["respondent_type"] == "公司方"]) if "respondent_type" in df.columns else 0} 份、'
+        f'投資方 {len(df[df["respondent_type"] == "投資方"]) if "respondent_type" in df.columns else 0} 份。'
+        '分析範圍涵蓋股權結構、董事會運作、資訊揭露、財務管理、內部控制及利害關係人治理等六大構面，'
+        '共計 20 項關鍵議題。'
+        '\n\n'
+        '統計分析採用卡方檢定（Chi-square test）檢驗公司方與投資方之觀點差異，'
+        '並以 Kruskal-Wallis H 檢定比較不同發展階段公司之治理實踐。'
+        '研究發現部分議題存在顯著之利害關係人觀點差異，亦觀察到公司發展階段對特定治理機制之影響。'
+        '本報告針對各項發現提出政策意涵與實務建議，以供政府機關、投資機構及未上市（櫃）公司參考。'
     )
     
-    # === 2. 樣本介紹 ===
-    add_heading_with_style(doc, '二、樣本介紹', level=1)
+    doc.add_paragraph(abstract_text)
     
-    doc.add_paragraph('本計畫樣本主要來自於臺灣未上市（櫃）公司及投資機構，樣本選取標準如下：')
+    doc.add_page_break()
     
-    # 未上市櫃公司
-    add_heading_with_style(doc, '(一) 未上市（櫃）公司', level=2)
-    doc.add_paragraph(
-        '本計畫根據國發基金投資方案的階段別差異，樣本公司依投資階段分為三類：'
-        '第一階段選擇創業天使投資方案；第二階段選擇加強投資中小企業實施方案、'
-        '加強投資策略性服務業實施方案、加強投資策略性製造業實施方案、'
-        '加強投資文化創意產業實施方案；第三階段則選擇直接投資方案之未上市（櫃）公司。'
-        '除此之外，本計畫亦挑選具有創新性及成長潛力的未上市（櫃）公司，'
-        '涵蓋半導體、人工智慧、通訊、電子商務、生技、與機械製造等多元產業。'
+    # === 1. 研究背景與目的 ===
+    add_heading_with_style(doc, '壹、研究背景與目的', level=1)
+    # === 1. 研究背景與目的 ===
+    add_heading_with_style(doc, '壹、研究背景與目的', level=1)
+    
+    add_heading_with_style(doc, '一、研究背景', level=2)
+    
+    background_text = (
+        '公司治理（Corporate Governance）係指公司經營權與所有權分離後，'
+        '為確保股東權益並兼顧利害關係人利益，所建立之一套管理與監督機制。'
+        '我國自 2002 年起推動公司治理改革，已建立相對完善之上市櫃公司治理制度。'
+        '然未上市（櫃）公司因規模較小、資訊透明度較低、利害關係人結構較為單純，'
+        '其治理機制之建立與執行與上市櫃公司有顯著差異。'
+        '\n\n'
+        '國家發展基金（以下簡稱國發基金）為促進產業升級及經濟發展，'
+        '透過創業天使投資方案、加強投資中小企業實施方案等多元管道，'
+        '投資未上市（櫃）公司。為瞭解受投資企業之治理現況，'
+        '並提供適切之輔導措施，實有必要針對不同發展階段之未上市（櫃）公司進行系統性調查。'
+    )
+    doc.add_paragraph(background_text)
+    
+    add_heading_with_style(doc, '二、研究目的', level=2)
+    
+    doc.add_paragraph('本研究具體目的如下：')
+    
+    purposes = [
+        '瞭解未上市（櫃）公司在股權結構、董事會運作、資訊揭露、財務管理、內部控制及利害關係人治理等面向之實踐現況。',
+        '比較公司方與投資方對公司治理議題之觀點差異，釐清雙方認知落差，促進溝通與共識建立。',
+        '分析不同發展階段公司之治理特徵，瞭解公司治理機制隨企業成長之演進模式。',
+        '透過統計檢定方法，檢驗利害關係人觀點差異與階段性差異之顯著性，提升研究發現之可信度。',
+        '依據研究發現，提出政策建議與實務作法，協助政府機關制定未上市（櫃）公司治理輔導政策。'
+    ]
+    
+    for i, purpose in enumerate(purposes, 1):
+        p = doc.add_paragraph(style='List Number')
+        p.add_run(purpose)
+    
+    doc.add_page_break()
+    
+    # === 2. 研究方法 ===
+    add_heading_with_style(doc, '貳、研究方法', level=1)
+    
+    add_heading_with_style(doc, '一、調查設計', level=2)
+    
+    method_text = (
+        '本研究採用問卷調查法（Questionnaire Survey），針對國發基金投資之未上市（櫃）公司'
+        '及其投資人進行調查。問卷設計參考公開發行公司董事會議事辦法、證券交易法相關規範、'
+        '以及國際公司治理準則（如 OECD Principles of Corporate Governance），'
+        '並依未上市（櫃）公司特性調整題項內容。'
+    )
+    doc.add_paragraph(method_text)
+    
+    add_heading_with_style(doc, '二、抽樣方法', level=2)
+    
+    sampling_text = (
+        '本研究採分層抽樣（Stratified Sampling）方式，依公司發展階段分為三層：'
+    )
+    doc.add_paragraph(sampling_text)
+    
+    sampling_layers = [
+        ('第一階段（創立期）', '接受創業天使投資方案之公司，多為成立 3 年內之新創企業，著重產品開發與市場驗證。'),
+        ('第二階段（成長期）', '接受加強投資中小企業、策略性服務業、策略性製造業、文化創意產業等方案之公司，已具備穩定營運模式，處於規模擴張階段。'),
+        ('第三階段（成熟期）', '接受直接投資方案之公司，營運相對穩定，具備一定市場地位，治理制度較為完善。')
+    ]
+    
+    for stage, desc in sampling_layers:
+        p = doc.add_paragraph(style='List Bullet')
+        p.add_run(stage + '：').bold = True
+        p.add_run(desc)
+    
+    add_heading_with_style(doc, '三、分析方法', level=2)
+    
+    analysis_text = (
+        '本研究採用描述性統計（Descriptive Statistics）與推論統計（Inferential Statistics）'
+        '進行資料分析：'
+    )
+    doc.add_paragraph(analysis_text)
+    
+    analysis_methods = [
+        ('描述性統計', '計算各題項之次數分配、百分比、平均數、標準差等，呈現樣本特徵與分佈情形。'),
+        ('卡方檢定（Chi-square test）', '檢驗公司方與投資方在各治理議題上之觀點差異是否達統計顯著水準（α = 0.05）。適用於類別變數之獨立性檢定。'),
+        ('Kruskal-Wallis H 檢定', '比較三個發展階段公司在各議題上之差異，屬無母數檢定方法，不假設資料符合常態分佈，適用於順序資料或偏態分佈之連續變數。'),
+        ('Fisher 精確檢定（Fisher\'s Exact Test）', '當 2×2 列聯表樣本數過小（期望次數 < 5）時，以 Fisher 精確檢定取代卡方檢定，提升檢定結果之準確性。')
+    ]
+    
+    for method, desc in analysis_methods:
+        p = doc.add_paragraph(style='List Number')
+        p.add_run(method + '：').bold = True
+        p.add_run(desc)
+    
+    doc.add_paragraph()
+    significance_note = doc.add_paragraph(
+        '註：本研究顯著性檢定採雙尾檢定（two-tailed test），顯著水準設定為 α = 0.05，'
+        '即當 p 值 < 0.05 時，拒絕虛無假設，認定組間差異達統計顯著水準。'
+        '顯著性標記說明：*** 表示 p < 0.001（高度顯著）、** 表示 p < 0.01（非常顯著）、'
+        '* 表示 p < 0.05（顯著）、n.s. 表示 p ≥ 0.05（無顯著差異）。'
+    )
+    significance_note.runs[0].font.size = Pt(10)
+    significance_note.runs[0].font.italic = True
+    
+    doc.add_page_break()
+    
+    # === 3. 題目選擇邏輯 ===
+    add_heading_with_style(doc, '參、分析架構與題目選擇', level=1)
+    
+    add_heading_with_style(doc, '一、分析架構', level=2)
+    
+    framework_text = (
+        '本研究參考國內外公司治理文獻，建構未上市櫃公司治理分析架構，'
+        '涵蓋六大構面：'
+    )
+    doc.add_paragraph(framework_text)
+    
+    framework_dimensions = [
+        ('股權結構與控制權', '探討股權集中度、經營團隊持股等議題，分析所有權與經營權之結合程度，以及對代理問題之影響。'),
+        ('股東會治理', '檢視股東會召開程序、議事錄完整性、董事出席情形等，評估股東權益保障機制之落實情況。'),
+        ('董事會治理機制', '分析董事會運作效能，包括會議通知、議事錄記載、召開頻率、議事內容及外部諮詢等面向。'),
+        ('財務報告與資訊透明度', '瞭解財務報表查核、股權結構揭露、業務及財務報告提供頻率等，評估資訊揭露之完整性與及時性。'),
+        ('內部控制與風險管理', '檢視財務職能分工、財務紀錄處理、智慧財產權保護等內部控制機制之建立與執行。'),
+        ('利害關係人治理', '探討員工激勵制度、利害關係人溝通管道等，瞭解公司對人力資本管理與多方協作之重視程度。')
+    ]
+    
+    for i, (dim, desc) in enumerate(framework_dimensions, 1):
+        p = doc.add_paragraph(style='List Number')
+        p.add_run(f'{dim}：').bold = True
+        p.add_run(desc)
+    
+    add_heading_with_style(doc, '二、題目選擇原則', level=2)
+    
+    logic_para = doc.add_paragraph(
+        '本研究從問卷題庫中精選 20 個關鍵議題進行深入分析，選題依據以下五項原則：'
     )
     
-    # 投資人
-    add_heading_with_style(doc, '(二) 投資人', level=2)
-    doc.add_paragraph(
-        '本計畫根據投資人所投資的未上市（櫃）公司發展階段，同樣設計三階段的問卷進行填答。'
-        '參與的投資人背景涵蓋國內外知名創投公司與企業創投（Corporate Venture Capital, CVC）。'
-        '其中，多數創投機構專注於第一階段與第二階段的未上市（櫃）公司投資，'
-        '而企業創投則主要聚焦於第三階段的投資標的。'
+    criteria = [
+        ('代表性原則', '題目需能代表各治理構面之核心議題，確保分析涵蓋股權結構、董事會運作、資訊揭露、財務管理、內部控制及利害關係人治理等面向，呈現公司治理之全貌。'),
+        ('差異性原則', '優先選擇公司方與投資方觀點可能存在差異之題目，如資訊揭露頻率、決策參與程度等，以釐清利害關係人認知落差，促進雙方溝通。'),
+        ('階段性原則', '選擇能反映公司發展階段特徵之題目，如創立期著重股權結構、成長期強調董事會運作、成熟期重視資訊揭露，以瞭解治理機制之演進模式。'),
+        ('實務性原則', '聚焦於治理機制之實際執行狀況，而非僅止於制度之存在與否。選擇可量化、可比較之指標，如董事會召開頻率、財報提供頻率等，提升分析之客觀性。'),
+        ('完整性原則', '避免選擇遺漏資料過多或選項過於單一之題目，確保統計分析之有效性與可信度。各題有效樣本數需達統計分析之最低要求。')
+    ]
+    
+    for i, (principle, desc) in enumerate(criteria, 1):
+        p = doc.add_paragraph(style='List Number')
+        p.add_run(principle + '：').bold = True
+        p.add_run(desc)
+    
+    selection_note = doc.add_paragraph()
+    selection_note.add_run(
+        '\n透過上述選題原則，本研究共選定 20 項議題進行分析。'
+        '每項議題均包含「公司方與投資方比較」及「公司發展階段分析」兩個面向，'
+        '並輔以適當之統計檢定方法，以全面呈現未上市櫃公司治理現況及其隨企業成長之演進趨勢。'
     )
     
-    # 樣本限制
-    add_heading_with_style(doc, '(三) 樣本限制', level=2)
-    doc.add_paragraph(
-        '由於資料來源主要集中於臺灣，因此可能無法全面代表其他地區的未上市（櫃）公司與'
-        '投資人特徵，存在一定的樣本偏誤。'
+    doc.add_page_break()
+    
+    # === 4. 樣本特性分析 ===
+    add_heading_with_style(doc, '肆、樣本特性分析', level=1)
+    # === 4. 樣本特性分析 ===
+    add_heading_with_style(doc, '肆、樣本特性分析', level=1)
+    
+    add_heading_with_style(doc, '一、樣本來源', level=2)
+    
+    sample_intro = doc.add_paragraph(
+        '本研究樣本來自國家發展基金投資之未上市（櫃）公司及其投資機構。'
+        '樣本公司產業分佈廣泛，涵蓋半導體、人工智慧、通訊、電子商務、生物科技、'
+        '機械製造等高成長潛力產業。投資機構則包括國內外知名創業投資公司（Venture Capital, VC）'
+        '與企業創投（Corporate Venture Capital, CVC）。'
     )
     
-    # === 3. 統計分析 ===
-    add_heading_with_style(doc, '三、統計分析', level=1)
+    add_heading_with_style(doc, '二、樣本結構', level=2)
+    add_heading_with_style(doc, '二、樣本結構', level=2)
     
     # 基本統計
     total_samples = len(df)
@@ -357,6 +552,70 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
         investor_count = len(df[df['respondent_type'] == '投資方'])
     else:
         company_count = investor_count = 0
+    
+    if 'phase' in df.columns:
+        phase_counts = df['phase'].value_counts().to_dict()
+        phase1_count = phase_counts.get('第一階段', 0)
+        phase2_count = phase_counts.get('第二階段', 0)
+        phase3_count = phase_counts.get('第三階段', 0)
+    else:
+        phase1_count = phase2_count = phase3_count = 0
+    
+    sample_structure = doc.add_paragraph(
+        f'本次調查共回收有效問卷 {total_samples} 份。依受訪者類型區分，'
+        f'公司方填答問卷 {company_count} 份（{company_count/total_samples*100:.1f}%），'
+        f'投資方填答問卷 {investor_count} 份（{investor_count/total_samples*100:.1f}%）。'
+        f'依公司發展階段區分，第一階段（創立期）{phase1_count} 份（{phase1_count/total_samples*100:.1f}%）、'
+        f'第二階段（成長期）{phase2_count} 份（{phase2_count/total_samples*100:.1f}%）、'
+        f'第三階段（成熟期）{phase3_count} 份（{phase3_count/total_samples*100:.1f}%）。'
+    )
+    
+    # 樣本結構表格
+    table_data = {
+        'columns': ['分類項目', '類別', '樣本數', '百分比'],
+        'data': [
+            ['受訪者類型', '公司方', company_count, f'{company_count/total_samples*100:.1f}%'],
+            ['', '投資方', investor_count, f'{investor_count/total_samples*100:.1f}%'],
+            ['', '小計', total_samples, '100.0%'],
+            ['公司發展階段', '第一階段（創立期）', phase1_count, f'{phase1_count/total_samples*100:.1f}%'],
+            ['', '第二階段（成長期）', phase2_count, f'{phase2_count/total_samples*100:.1f}%'],
+            ['', '第三階段（成熟期）', phase3_count, f'{phase3_count/total_samples*100:.1f}%'],
+            ['', '小計', total_samples, '100.0%']
+        ]
+    }
+    
+    add_statistics_table(doc, table_data, title='表 1：樣本結構分布表')
+    
+    add_heading_with_style(doc, '三、樣本限制', level=2)
+    add_heading_with_style(doc, '三、樣本限制', level=2)
+    
+    limitation_text = (
+        '本研究樣本主要來自國家發展基金投資之未上市（櫃）公司，'
+        '在樣本代表性上存在以下限制：'
+    )
+    doc.add_paragraph(limitation_text)
+    
+    limitations = [
+        '樣本公司多為接受政府投資之企業，可能與一般未上市（櫃）公司在治理水準上存在系統性差異。',
+        '樣本集中於臺灣地區，研究發現之適用性可能受地域文化、法規環境等因素影響，推論至其他國家或地區時需審慎。',
+        '受限於調查時間與資源，本研究採橫斷面調查設計（Cross-sectional Study），無法追蹤個別公司治理之動態變化。',
+        '部分議題可能涉及公司敏感資訊，受訪者填答時可能存在社會期許偏誤（Social Desirability Bias），影響資料真實性。'
+    ]
+    
+    for limitation in limitations:
+        p = doc.add_paragraph(style='List Bullet')
+        p.add_run(limitation)
+    
+    doc.add_paragraph()
+    limitation_note = doc.add_paragraph(
+        '儘管存在上述限制，本研究透過嚴謹之調查設計、適當之統計方法及詳實之資料分析，'
+        '仍能提供未上市櫃公司治理現況之有效資訊，作為政策制定與實務改善之參考依據。'
+    )
+    
+    doc.add_page_break()
+    
+    # === 5. 分析結果 ===
+    add_heading_with_style(doc, '伍、分析結果', level=1)
     
     doc.add_paragraph(f'本研究問卷共蒐集樣本 {total_samples} 份，樣本共分為兩類：')
     doc.add_paragraph(f'• 公司方：共計 {company_count} 份，涵蓋創辦人、高階主管及公司治理相關人員等')
@@ -424,16 +683,25 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     
     return doc
 
-def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
+def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_question=''):
     """
     新增單一議題的完整分析
-    包含：標題、描述、表格、圖表、統計檢定、業務解讀
+    包含：完整題目、描述、表格、圖表、統計檢定、業務解讀
     即使統計檢定沒過也提供詳細敘述
     
     注意：如果df沒有'respondent_type'欄位，則只做整體分析，不做公司方vs投資方比較
     """
     
     add_heading_with_style(doc, topic_title, level=2)
+    
+    # 顯示完整題目
+    if full_question:
+        question_para = doc.add_paragraph()
+        question_para.add_run('問卷題目：').bold = True
+        question_para.add_run(full_question)
+        question_para.runs[0].font.size = Pt(11)
+        question_para.runs[1].font.size = Pt(11)
+        question_para.runs[1].font.color.rgb = RGBColor(64, 64, 64)
     
     if topic_description:
         para = doc.add_paragraph(topic_description)
@@ -480,22 +748,25 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
             'data': []
         }
         
-        for idx in crosstab.index:
-            if idx != 'All':
-                company_count = crosstab.loc[idx, '公司方'] if '公司方' in crosstab.columns else 0
-                company_pct = f"{crosstab_pct.loc[idx, '公司方']:.1f}%" if '公司方' in crosstab.columns else '-'
-                investor_count = crosstab.loc[idx, '投資方'] if '投資方' in crosstab.columns else 0
-                investor_pct = f"{crosstab_pct.loc[idx, '投資方']:.1f}%" if '投資方' in crosstab.columns else '-'
-                total = crosstab.loc[idx, 'All']
-                
-                table_data['data'].append([
-                    str(idx), 
-                    company_count, 
-                    company_pct, 
-                    investor_count, 
-                    investor_pct, 
-                    total
-                ])
+        # 智慧排序選項
+        categories = [idx for idx in crosstab.index if idx != 'All']
+        sorted_categories = smart_sort_categories(categories)
+        
+        for idx in sorted_categories:
+            company_count = crosstab.loc[idx, '公司方'] if '公司方' in crosstab.columns else 0
+            company_pct = f"{crosstab_pct.loc[idx, '公司方']:.1f}%" if '公司方' in crosstab.columns else '-'
+            investor_count = crosstab.loc[idx, '投資方'] if '投資方' in crosstab.columns else 0
+            investor_pct = f"{crosstab_pct.loc[idx, '投資方']:.1f}%" if '投資方' in crosstab.columns else '-'
+            total = crosstab.loc[idx, 'All']
+            
+            table_data['data'].append([
+                str(idx), 
+                company_count, 
+                company_pct, 
+                investor_count, 
+                investor_pct, 
+                total
+            ])
         
         # 合計行
         company_total = crosstab.loc['All', '公司方'] if '公司方' in crosstab.columns else 0
@@ -553,13 +824,16 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
             'data': []
         }
         
-        for idx in crosstab.index:
-            if idx != '合計':
-                table_data['data'].append([
-                    str(idx),
-                    int(crosstab.loc[idx, '次數']),
-                    f"{crosstab.loc[idx, '百分比']:.1f}%"
-                ])
+        # 智慧排序選項
+        categories = [idx for idx in crosstab.index if idx != '合計']
+        sorted_categories = smart_sort_categories(categories)
+        
+        for idx in sorted_categories:
+            table_data['data'].append([
+                str(idx),
+                int(crosstab.loc[idx, '次數']),
+                f"{crosstab.loc[idx, '百分比']:.1f}%"
+            ])
         
         # 合計行
         table_data['data'].append([
@@ -709,7 +983,9 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
             
             if len(phases) > 0:
                 table_columns = ['選項']
-                for phase in phases:
+                # 確保階段按一二三順序
+                sorted_phases = smart_sort_categories(phases)
+                for phase in sorted_phases:
                     table_columns.extend([f'{phase}人數', f'{phase}百分比'])
                 table_columns.append('合計')
                 
@@ -718,23 +994,26 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
                     'data': []
                 }
                 
-                for idx in phase_crosstab.index:
-                    if idx != 'All':
-                        row = [str(idx)]
-                        for phase in phases:
-                            if phase in phase_crosstab.columns:
-                                count = phase_crosstab.loc[idx, phase]
-                                pct = f"{phase_crosstab_pct.loc[idx, phase]:.1f}%"
-                            else:
-                                count = 0
-                                pct = '-'
-                            row.extend([count, pct])
-                        row.append(phase_crosstab.loc[idx, 'All'])
-                        table_data['data'].append(row)
+                # 智慧排序選項
+                categories = [idx for idx in phase_crosstab.index if idx != 'All']
+                sorted_categories = smart_sort_categories(categories)
+                
+                for idx in sorted_categories:
+                    row = [str(idx)]
+                    for phase in sorted_phases:
+                        if phase in phase_crosstab.columns:
+                            count = phase_crosstab.loc[idx, phase]
+                            pct = f"{phase_crosstab_pct.loc[idx, phase]:.1f}%"
+                        else:
+                            count = 0
+                            pct = '-'
+                        row.extend([count, pct])
+                    row.append(phase_crosstab.loc[idx, 'All'])
+                    table_data['data'].append(row)
                 
                 # 合計行
                 total_row = ['合計']
-                for phase in phases:
+                for phase in sorted_phases:
                     if phase in phase_crosstab.columns:
                         total_row.extend([phase_crosstab.loc['All', phase], '100.0%'])
                     else:
@@ -752,8 +1031,8 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
                     # 獲取所有類別（排除 'All'）
                     categories = [idx for idx in phase_crosstab.index if idx != 'All']
                     
-                    # 創建階段比較長條圖
-                    chart_title = f"{topic_title} - 公司發展階段比較"
+                    # 創建階段比較長條圖 - 使用完整問卷題目
+                    chart_title = full_question if full_question else f"{topic_title} - 公司發展階段比較"
                     fig = create_phase_chart(phase_crosstab, phase_crosstab_pct, chart_title, categories, phases)
                     
                     # 儲存圖片
@@ -777,58 +1056,199 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description):
                     print(f"階段圖表插入失敗: {e}")
                     doc.add_paragraph(f'（圖表生成時發生錯誤）')
                 
-                # Kruskal-Wallis 檢定
+                # === 統計檢定：根據資料類型選擇適當方法 ===
                 doc.add_paragraph('【統計檢定】', style='Heading 4')
                 
                 try:
-                    # 嘗試將選項轉為數值進行檢定
+                    # 準備階段分組資料
                     phase_groups = [df_phase[df_phase['phase'] == p][topic_col].dropna() for p in phases]
                     valid_groups = [g for g in phase_groups if len(g) > 0]
                     
-                    if len(valid_groups) >= 2 and all(len(g) >= 3 for g in valid_groups):
-                        # 嘗試轉換為數值
-                        numeric_groups = []
-                        for g in valid_groups:
-                            try:
-                                numeric_groups.append(pd.to_numeric(g, errors='coerce').dropna())
-                            except:
-                                pass
+                    if len(valid_groups) < 2:
+                        raise ValueError("有效階段組別不足（需至少2組）")
+                    
+                    # 判斷資料類型：嘗試轉換為數值
+                    is_numeric = False
+                    numeric_groups = []
+                    for g in valid_groups:
+                        try:
+                            numeric_g = pd.to_numeric(g, errors='coerce').dropna()
+                            if len(numeric_g) >= 3:  # 至少3個樣本
+                                numeric_groups.append(numeric_g)
+                        except:
+                            pass
+                    
+                    # 如果所有組別都能轉為數值且樣本數足夠，視為連續變數
+                    if len(numeric_groups) == len(valid_groups) and all(len(g) >= 3 for g in numeric_groups):
+                        is_numeric = True
+                    
+                    if is_numeric:
+                        # === 連續變數：使用 Kruskal-Wallis H 檢定（無母數）===
+                        H_stat, p_val = kruskal(*numeric_groups)
                         
-                        if len(numeric_groups) >= 2 and all(len(g) >= 3 for g in numeric_groups):
-                            H_stat, p_val = kruskal(*numeric_groups)
-                            
-                            significance = ''
-                            if p_val < 0.05:
-                                significance = '*（顯著）'
-                            else:
-                                significance = 'n.s.（無顯著差異）'
-                            
-                            doc.add_paragraph(f"檢定方法：Kruskal-Wallis H 檢定（無母數檢定）")
-                            doc.add_paragraph(f"H 統計量：{H_stat:.3f}")
-                            doc.add_paragraph(f"顯著性水準：p = {p_val:.4f} {significance}")
-                            
-                            # 階段分析解讀
-                            doc.add_paragraph()
-                            doc.add_paragraph('【階段差異分析】', style='Heading 4')
-                            
-                            if p_val < 0.05:
-                                doc.add_paragraph(
-                                    f"統計檢定顯示不同發展階段的公司在本議題上存在顯著差異（p = {p_val:.4f}）。"
-                                    f"此結果表明公司發展階段確實影響此議題的表現或認知。"
-                                    f"建議針對不同階段公司的特性，提供差異化的治理建議或輔導措施。"
-                                )
-                            else:
-                                doc.add_paragraph(
-                                    f"統計檢定顯示不同發展階段的公司在本議題上無顯著差異（p = {p_val:.4f}）。"
-                                    f"此結果表明本議題可能是跨階段的共同關注點，不因公司發展階段而有明顯變化。"
-                                )
+                        significance = ''
+                        if p_val < 0.001:
+                            significance = '***（高度顯著）'
+                        elif p_val < 0.01:
+                            significance = '**（非常顯著）'
+                        elif p_val < 0.05:
+                            significance = '*（顯著）'
                         else:
-                            raise ValueError("資料無法轉換為數值")
+                            significance = 'n.s.（無顯著差異）'
+                        
+                        doc.add_paragraph(f"檢定方法：Kruskal-Wallis H 檢定（無母數檢定，適用於連續變數）")
+                        doc.add_paragraph(f"H 統計量：{H_stat:.3f}")
+                        doc.add_paragraph(f"自由度：{len(numeric_groups) - 1}")
+                        doc.add_paragraph(f"顯著性水準：p = {p_val:.4f} {significance}")
+                        
+                        doc.add_paragraph()
+                        doc.add_paragraph('【統計解讀】', style='Heading 4')
+                        doc.add_paragraph(
+                            f"Kruskal-Wallis H 檢定用於比較三個或以上獨立組別的中位數是否存在差異，"
+                            f"不假設資料符合常態分佈，適用於順序資料或非常態分佈的連續資料。"
+                        )
+                        
                     else:
-                        raise ValueError("各組樣本數不足")
+                        # === 類別變數：使用卡方檢定 ===
+                        # 建立列聯表（不含邊際合計）
+                        phase_crosstab_test = pd.crosstab(df_phase[topic_col], df_phase['phase'])
+                        
+                        # 確保有足夠的期望次數
+                        chi2, p_val, dof, expected = chi2_contingency(phase_crosstab_test)
+                        
+                        # 檢查期望次數是否足夠（至少80%的格子 > 5）
+                        low_expected = (expected < 5).sum()
+                        total_cells = expected.size
+                        low_expected_pct = (low_expected / total_cells) * 100
+                        
+                        significance = ''
+                        if p_val < 0.001:
+                            significance = '***（高度顯著）'
+                        elif p_val < 0.01:
+                            significance = '**（非常顯著）'
+                        elif p_val < 0.05:
+                            significance = '*（顯著）'
+                        else:
+                            significance = 'n.s.（無顯著差異）'
+                        
+                        doc.add_paragraph(f"檢定方法：卡方獨立性檢定（Chi-square test of independence，適用於類別變數）")
+                        doc.add_paragraph(f"卡方統計量：χ² = {chi2:.3f}")
+                        doc.add_paragraph(f"自由度：df = {dof}")
+                        doc.add_paragraph(f"顯著性水準：p = {p_val:.4f} {significance}")
+                        
+                        # 警告：如果期望次數過低
+                        if low_expected_pct > 20:
+                            doc.add_paragraph(f"註：本題有 {low_expected_pct:.1f}% 之儲存格期望次數小於 5，檢定結果之穩定性可能受影響，解讀時需審慎。")
+                        
+                        doc.add_paragraph()
+                        doc.add_paragraph('【統計解讀】', style='Heading 4')
+                        doc.add_paragraph(
+                            f"卡方檢定用於檢驗兩個類別變數之間是否存在關聯性。"
+                            f"在此分析中，檢驗「公司發展階段」與「{topic_title}」是否具有顯著關聯。"
+                            f"虛無假設（H₀）為兩變數獨立（無關聯），對立假設（H₁）為兩變數有關聯。"
+                        )
+                    
+                    # === 共同的階段差異分析 ===
+                    doc.add_paragraph()
+                    doc.add_paragraph('【階段差異分析】', style='Heading 4')
+                    
+                    if p_val < 0.05:
+                        doc.add_paragraph(
+                            f"統計檢定顯示不同發展階段的公司在「{topic_title}」存在顯著差異（p = {p_val:.4f}）。"
+                            f"此結果表明公司發展階段確實影響此議題的表現或認知。"
+                        )
+                        
+                        # 提供各階段的具體觀察
+                        doc.add_paragraph()
+                        doc.add_paragraph('各階段特徵：', style='List Bullet')
+                        
+                        phase_analysis = {}
+                        for phase in sorted_phases:
+                            if phase in phase_crosstab_pct.columns:
+                                top_option = phase_crosstab_pct[phase].idxmax()
+                                top_pct = phase_crosstab_pct.loc[top_option, phase]
+                                phase_analysis[phase] = {'option': top_option, 'pct': top_pct}
+                                
+                                p_bullet = doc.add_paragraph(style='List Bullet 2')
+                                p_bullet.add_run(f"{phase}：").bold = True
+                                p_bullet.add_run(f"主要選擇「{top_option}」（{top_pct:.1f}%）")
+                        
+                        # 深度趨勢分析
+                        doc.add_paragraph()
+                        doc.add_paragraph('【趨勢觀察與政策意涵】', style='Heading 4')
+                        
+                        # 比較第一階段與第三階段的變化
+                        if '第一階段' in phase_analysis and '第三階段' in phase_analysis:
+                            stage1_option = phase_analysis['第一階段']['option']
+                            stage3_option = phase_analysis['第三階段']['option']
+                            
+                            if stage1_option == stage3_option:
+                                doc.add_paragraph(
+                                    f"從發展軌跡觀察，第一階段至第三階段的公司皆以「{stage1_option}」為主要選擇，"
+                                    f"顯示此治理實務在各發展階段均受重視。然而，各階段在選擇比例上仍存在差異，"
+                                    f"反映出隨著公司成熟度提升，治理機制的深化程度有所不同。"
+                                )
+                            else:
+                                doc.add_paragraph(
+                                    f"觀察公司發展軌跡，第一階段主要選擇「{stage1_option}」，"
+                                    f"至第三階段則轉向「{stage3_option}」，顯示公司治理實務隨發展階段而演進。"
+                                    f"此變化反映出企業在不同成長階段對治理機制有不同的需求與優先順序。"
+                                )
+                        
+                        # 政策建議
+                        doc.add_paragraph(
+                            f"建議針對不同階段公司的特性，提供差異化的治理建議或輔導措施："
+                        )
+                        
+                        policy_bullets = [
+                            "第一階段（種子輪至B輪）：著重基礎治理架構建立，協助新創企業理解治理重要性，建立基本的決策流程與資訊揭露機制",
+                            "第二階段（C輪至D輪）：強化內部控制與資訊透明度，輔導企業建立更完善的內部稽核制度、財務管理系統及股東溝通機制",
+                            "第三階段（擴展期至成熟期）：完善利害關係人溝通與永續治理，協助企業建立全面性治理框架，為未來可能的IPO或併購做準備"
+                        ]
+                        
+                        for policy in policy_bullets:
+                            p = doc.add_paragraph(style='List Bullet 2')
+                            p.add_run(policy)
+                    else:
+                        doc.add_paragraph(
+                            f"統計檢定顯示不同發展階段的公司在「{topic_title}」無顯著差異（p = {p_val:.4f}）。"
+                            f"此結果表明本議題可能是跨階段的共同關注點，不因公司發展階段而有明顯變化。"
+                        )
+                        
+                        # 即使不顯著，仍提供描述性觀察
+                        doc.add_paragraph()
+                        doc.add_paragraph('各階段分佈觀察：', style='List Bullet')
+                        
+                        phase_consistency = []
+                        for phase in sorted_phases:
+                            if phase in phase_crosstab_pct.columns:
+                                top_option = phase_crosstab_pct[phase].idxmax()
+                                top_pct = phase_crosstab_pct.loc[top_option, phase]
+                                phase_consistency.append(top_option)
+                                
+                                p_bullet = doc.add_paragraph(style='List Bullet 2')
+                                p_bullet.add_run(f"{phase}：").bold = True
+                                p_bullet.add_run(f"主要選擇「{top_option}」（{top_pct:.1f}%）")
+                        
+                        # 一致性分析
+                        doc.add_paragraph()
+                        doc.add_paragraph('【實務意涵】', style='Heading 4')
+                        
+                        if len(set(phase_consistency)) == 1:
+                            doc.add_paragraph(
+                                f"值得注意的是，雖然統計上未達顯著差異，但三個發展階段的公司均以「{phase_consistency[0]}」為主要選擇，"
+                                f"顯示此治理實務具有跨階段的一致性，是未上市櫃公司普遍認同的治理方式。"
+                                f"此共識可作為推動相關政策或建立治理標準的重要依據。"
+                            )
+                        else:
+                            doc.add_paragraph(
+                                f"雖然統計上未達顯著差異，但各階段主要選擇略有不同，"
+                                f"建議持續觀察各階段公司的治理實踐，累積更多資料以深入了解階段性差異的細微變化。"
+                                f"此類描述性資訊仍具參考價值，可供業務推動時考量不同階段公司的特性。"
+                            )
                         
                 except Exception as e:
-                    doc.add_paragraph("由於資料類型為類別變項或樣本數不足，無法進行階段差異檢定。")
+                    doc.add_paragraph(f"由於資料結構限制或樣本數不足，無法進行統計檢定。錯誤訊息：{str(e)}")
                     doc.add_paragraph()
                     doc.add_paragraph('【階段分佈觀察】', style='Heading 4')
                     
@@ -877,42 +1297,45 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
                     return '投資方'
                 return '公司方'
             df['respondent_type'] = df['_source_file'].astype(str).apply(infer_role)
-            print("✓ 已自動添加 respondent_type 欄位")
+            print("已自動添加 respondent_type 欄位")
         
-        # 添加 phase（從檔案名或欄位推斷）
+        # 添加 phase（優先從問卷欄位推斷，其次從檔名推斷）
         if 'phase' not in df.columns:
-            # 嘗試從 _source_file 推斷階段
-            if '_source_file' in df.columns:
-                def infer_phase(fname):
-                    if not isinstance(fname, str):
-                        return '未標註'
-                    if '第一階段' in fname or '一階段' in fname:
-                        return '第一階段'
-                    if '第二階段' in fname or '二階段' in fname:
-                        return '第二階段'
-                    if '第三階段' in fname or '三階段' in fname:
-                        return '第三階段'
-                    return '未標註'
-                df['phase'] = df['_source_file'].astype(str).apply(infer_phase)
-                print("✓ 已自動添加 phase 欄位")
+            phase_added = False
             
-            # 或從問卷欄位推斷
-            phase_col_candidates = [col for col in df.columns if '階段' in col and '問卷' in col]
-            if phase_col_candidates and 'phase' not in df.columns:
-                phase_col = phase_col_candidates[0]
+            # 方法1: 優先從問卷內容欄位推斷（最準確）
+            PHASE_COLUMN_NAME = "請問公司目前主要處於哪個發展階段？："
+            if PHASE_COLUMN_NAME in df.columns:
                 def extract_phase(val):
                     if pd.isna(val):
-                        return '未標註'
+                        return None
                     val_str = str(val)
-                    if '第一階段' in val_str:
+                    if '第一階段' in val_str or '一階段' in val_str:
                         return '第一階段'
-                    if '第二階段' in val_str:
+                    elif '第二階段' in val_str or '二階段' in val_str:
                         return '第二階段'
-                    if '第三階段' in val_str:
+                    elif '第三階段' in val_str or '三階段' in val_str:
                         return '第三階段'
-                    return '未標註'
-                df['phase'] = df[phase_col].apply(extract_phase)
-                print(f"✓ 從欄位 '{phase_col}' 推斷 phase")
+                    return None
+                df['phase'] = df[PHASE_COLUMN_NAME].apply(extract_phase)
+                print(f"從問卷欄位推斷 phase")
+                phase_added = True
+            
+            # 方法2: 從檔案名推斷階段（備用方法）
+            if not phase_added and '_source_file' in df.columns:
+                def infer_phase(fname):
+                    if not isinstance(fname, str):
+                        return None
+                    if '第一階段' in fname or '一階段' in fname:
+                        return '第一階段'
+                    elif '第二階段' in fname or '二階段' in fname:
+                        return '第二階段'
+                    elif '第三階段' in fname or '三階段' in fname:
+                        return '第三階段'
+                    return None
+                df['phase'] = df['_source_file'].astype(str).apply(infer_phase)
+                print("從檔案名推斷 phase")
+                phase_added = True
     
     # 創建基礎文件
     doc = generate_descriptive_report_word(df, output_path)
@@ -925,112 +1348,132 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
         {
             'col': '請問公司大股東（持股5%以上）合計持股比例為多少？',
             'title': '3.1 大股東合計持股比例',
-            'description': '分析大股東合計持股比例，評估股權集中程度與控制權分配。股權集中度是公司治理的基礎指標，影響決策效率與股東權益保護。'
+            'description': '分析大股東合計持股比例，評估股權集中程度與控制權分配。股權集中度是公司治理的基礎指標，影響決策效率與股東權益保護。',
+            'question': '請問公司大股東（持股5%以上）合計持股比例為多少？'
         },
         {
             'col': '請問公司經營團隊合計持股比例為多少？',
             'title': '3.2 經營團隊持股比例',
-            'description': '分析經營團隊持股情況，了解管理層與公司利益的一致性程度。經營團隊持股比例反映所有權與經營權的結合程度，是評估代理問題的關鍵指標。'
+            'description': '分析經營團隊持股情況，了解管理層與公司利益的一致性程度。經營團隊持股比例反映所有權與經營權的結合程度，是評估代理問題的關鍵指標。',
+            'question': '請問公司經營團隊合計持股比例為多少？'
         },
         
         # === 二、股東會治理（3題）===
         {
             'col': '股東會結構與運作 - 公司股東常會的議程及相關資料能在20天前通知，並以可存證的方式（如：掛號或經股東同意的電子方式）寄發',
             'title': '3.3 股東會通知時效性',
-            'description': '評估股東會召開前的資訊揭露時效。充分的準備時間讓股東能審慎評估議案，是保障股東權益的基本要求。'
+            'description': '評估股東會召開前的資訊揭露時效。充分的準備時間讓股東能審慎評估議案，是保障股東權益的基本要求。',
+            'question': '公司股東常會的議程及相關資料能在20天前通知，並以可存證的方式（如：掛號或經股東同意的電子方式）寄發'
         },
         {
             'col': '股東會結構與運作 - 公司股東會決議方式能夠清楚載明，且議事錄完整記載會議資訊（如時間、地點、主席、決議方法及結果）',
             'title': '3.4 股東會決議與議事錄完整性',
-            'description': '評估股東會決策的透明度與記錄完整性。完整的議事錄是確保決策可追溯性的基礎，也是公司治理品質的重要指標。'
+            'description': '評估股東會決策的透明度與記錄完整性。完整的議事錄是確保決策可追溯性的基礎，也是公司治理品質的重要指標。',
+            'question': '公司股東會決議方式能夠清楚載明，且議事錄完整記載會議資訊（如時間、地點、主席、決議方法及結果）'
         },
         {
             'col': '股東會結構與運作 - 公司董事長及董事通常能夠親自出席股東常會',
             'title': '3.5 董事出席股東會情況',
-            'description': '調查董事對股東會的重視程度。董事親自出席能直接回應股東關切，展現負責任的治理態度。'
+            'description': '調查董事對股東會的重視程度。董事親自出席能直接回應股東關切，展現負責任的治理態度。',
+            'question': '公司董事長及董事通常能夠親自出席股東常會'
         },
         
         # === 三、董事會治理機制（5題）===
         {
             'col': '董事會結構與運作 - 公司董事會的議程及相關資料能在3天前通知，並以掛號或電子方式（經過股東同意或於公司章程中載明）寄發',
             'title': '3.6 董事會通知時效性',
-            'description': '評估董事會會前資訊揭露的及時性。提前通知讓董事有充分時間準備，提升會議品質與決策效率。'
+            'description': '評估董事會會前資訊揭露的及時性。提前通知讓董事有充分時間準備，提升會議品質與決策效率。',
+            'question': '公司董事會的議程及相關資料能在3天前通知，並以掛號或電子方式（經過股東同意或於公司章程中載明）寄發'
         },
         {
             'col': '董事會結構與運作 - 公司董事會決議方式能夠清楚載明，且議事錄完整記載會議資訊（如時間、地點、主席、決議方法及結果）',
             'title': '3.7 董事會決議與議事錄完整性',
-            'description': '評估董事會決策的透明度與記錄完整性。完整的議事錄是確保董事會決策可追溯性的基礎，也是公司治理品質的重要指標。'
+            'description': '評估董事會決策的透明度與記錄完整性。完整的議事錄是確保董事會決策可追溯性的基礎，也是公司治理品質的重要指標。',
+            'question': '公司董事會決議方式能夠清楚載明，且議事錄完整記載會議資訊（如時間、地點、主席、決議方法及結果）'
         },
         {
             'col': '董事會結構與運作 - 公司通常每年召開一次股東常會，並是由董事會召集',
             'title': '3.8 股東會召集程序',
-            'description': '調查股東會的召集程序與規律性。定期召開股東會並由董事會召集，是公司治理的基本程序要求。'
+            'description': '調查股東會的召集程序與規律性。定期召開股東會並由董事會召集，是公司治理的基本程序要求。',
+            'question': '公司通常每年召開一次股東常會，並是由董事會召集'
         },
         {
             'col': '公司定期性董事會的議事內容，通常包含以下哪些項目？ (可複選)',
             'title': '3.9 董事會議事內容廣度',
-            'description': '評估董事會討論議題的完整性。多元的議事內容反映董事會對公司營運的全方位監督。'
+            'description': '評估董事會討論議題的完整性。多元的議事內容反映董事會對公司營運的全方位監督。',
+            'question': '公司定期性董事會的議事內容，通常包含以下哪些項目？（可複選）'
         },
         {
             'col': '董事會結構與運作 - 在過去12個月內，貴公司董事會的召開頻率為何？',
             'title': '3.10 董事會召開頻率',
-            'description': '調查董事會的開會頻率。定期召開董事會是確保董事會有效運作、即時監督公司營運的基本要求。'
+            'description': '調查董事會的開會頻率。定期召開董事會是確保董事會有效運作、即時監督公司營運的基本要求。',
+            'question': '在過去12個月內，貴公司董事會的召開頻率為何？'
         },
         
         # === 四、財務報告與資訊透明度（5題）===
         {
             'col': '董事會結構與運作 - 公司諮詢顧問／業師的頻率為何？',
             'title': '3.11 外部專業諮詢頻率',
-            'description': '評估公司尋求外部專業意見的積極程度。適度的外部諮詢能引入專業觀點，提升決策品質。'
+            'description': '評估公司尋求外部專業意見的積極程度。適度的外部諮詢能引入專業觀點，提升決策品質。',
+            'question': '公司諮詢顧問／業師的頻率為何？'
         },
         {
             'col': '公司最近一期的年度財務報表，是否委任外部會計師進行查核簽證？若有，其遵循的會計準則為何？',
             'title': '3.12 財務報表查核與會計準則',
-            'description': '調查公司財務報表的外部查核情況與會計準則遵循。外部查核是確保財務資訊可信度的關鍵機制，是投資人決策的重要依據。'
+            'description': '調查公司財務報表的外部查核情況與會計準則遵循。外部查核是確保財務資訊可信度的關鍵機制，是投資人決策的重要依據。',
+            'question': '公司最近一期的年度財務報表，是否委任外部會計師進行查核簽證？若有，其遵循的會計準則為何？'
         },
         {
             'col': '資訊透明度 - 公司通常多久向股東揭露董事、監察人、經理人及持股超過10%大股東的持股情形、股權質押比率與前十大股東之股權結構圖或表',
             'title': '3.13 股權結構資訊揭露',
-            'description': '評估公司股權結構資訊的透明度與更新頻率。股權結構揭露讓投資人了解公司控制權變動與潛在利益衝突，是重大資訊透明的體現。'
+            'description': '評估公司股權結構資訊的透明度與更新頻率。股權結構揭露讓投資人了解公司控制權變動與潛在利益衝突，是重大資訊透明的體現。',
+            'question': '公司通常多久向股東揭露董事、監察人、經理人及持股超過10%大股東的持股情形、股權質押比率與前十大股東之股權結構圖或表'
         },
         {
             'col': '資訊透明度 - 公司通常多久向股東提供業務報告（如營運、研發進度等）',
             'title': '3.14 業務報告提供頻率',
-            'description': '了解公司向股東揭露業務資訊的頻率。定期的業務報告讓股東掌握公司營運狀況，是資訊透明的重要體現。'
+            'description': '了解公司向股東揭露業務資訊的頻率。定期的業務報告讓股東掌握公司營運狀況，是資訊透明的重要體現。',
+            'question': '公司通常多久向股東提供業務報告（如營運、研發進度等）'
         },
         {
             'col': '資訊透明度 - 公司通常多久向股東提供財務報告',
             'title': '3.15 財務報告提供頻率',
-            'description': '了解公司向股東揭露財務資訊的頻率與即時性。定期且及時的財務報告是股東監督管理層的基礎，反映公司資訊透明度。'
+            'description': '了解公司向股東揭露財務資訊的頻率與即時性。定期且及時的財務報告是股東監督管理層的基礎，反映公司資訊透明度。',
+            'question': '公司通常多久向股東提供財務報告'
         },
         
         # === 五、內部控制與風險管理（3題）===
         {
             'col': '內控與風險評估（含財務與營運風險） - 公司由不同人員分別負責出納與會計',
             'title': '3.16 財務職能分工',
-            'description': '評估公司財務內部控制的基本分工情況。出納與會計分工是財務內控的基石，有效防止舞弊與錯誤，是未上市櫃公司最基本但最關鍵的控制點。'
+            'description': '評估公司財務內部控制的基本分工情況。出納與會計分工是財務內控的基石，有效防止舞弊與錯誤，是未上市櫃公司最基本但最關鍵的控制點。',
+            'question': '公司由不同人員分別負責出納與會計'
         },
         {
             'col': '內控與風險評估（含財務與營運風險） - 公司財務紀錄由專責人員或外部會計師協助處理',
             'title': '3.17 財務紀錄專業處理',
-            'description': '調查公司財務紀錄的專業處理機制。專責人員或外部專業協助能確保財務紀錄的準確性與合規性。'
+            'description': '調查公司財務紀錄的專業處理機制。專責人員或外部專業協助能確保財務紀錄的準確性與合規性。',
+            'question': '公司財務紀錄由專責人員或外部會計師協助處理'
         },
         {
             'col': '內控與風險評估（含財務與營運風險） - 公司開發的專利、商標等智慧財產權，均已登記在公司名下',
             'title': '3.18 智慧財產權保護',
-            'description': '評估公司對智慧財產權的保護措施。完整的智財權登記能保障公司核心資產，防範法律風險。'
+            'description': '評估公司對智慧財產權的保護措施。完整的智財權登記能保障公司核心資產，防範法律風險。',
+            'question': '公司開發的專利、商標等智慧財產權，均已登記在公司名下'
         },
         
         # === 六、利害關係人治理（2題）===
         {
             'col': '利害關係人 - 公司員工分紅制度設計能有效激勵員工',
             'title': '3.19 員工激勵制度',
-            'description': '評估公司員工激勵機制的有效性。有效的員工激勵制度能將員工利益與公司長期發展結合，是人力資本管理與公司永續經營的關鍵。'
+            'description': '評估公司員工激勵機制的有效性。有效的員工激勵制度能將員工利益與公司長期發展結合，是人力資本管理與公司永續經營的關鍵。',
+            'question': '公司員工分紅制度設計能有效激勵員工'
         },
         {
             'col': '利害關係人 - 公司已建立與主要利害關係人（如員工、債權人、外部投資人等）的溝通管道',
             'title': '3.20 利害關係人溝通機制',
-            'description': '調查公司與利害關係人的溝通管道建立情況。良好的溝通機制能促進多方協作，降低衝突風險，是企業永續經營的基礎。'
+            'description': '調查公司與利害關係人的溝通管道建立情況。良好的溝通機制能促進多方協作，降低衝突風險，是企業永續經營的基礎。',
+            'question': '公司已建立與主要利害關係人（如員工、債權人、外部投資人等）的溝通管道'
         },
     ]
     
@@ -1040,7 +1483,13 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
         if topic['col'] in df.columns:
             print(f"正在分析: {topic['title']}")
             try:
-                add_topic_analysis(doc, df, topic['col'], topic['title'], topic['description'])
+                add_topic_analysis(
+                    doc, df, 
+                    topic['col'], 
+                    topic['title'], 
+                    topic['description'],
+                    full_question=topic.get('question', '')
+                )
                 analyzed_count += 1
             except Exception as e:
                 print(f"分析 {topic['title']} 時發生錯誤: {e}")
@@ -1048,11 +1497,11 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
         else:
             print(f"欄位不存在，跳過: {topic['col']}")
     
-    print(f"✅ 共分析 {analyzed_count} 個議題")
+    print(f"共分析 {analyzed_count} 個議題")
     
     # 儲存文件
     doc.save(output_path)
-    print(f"✅ 報告已儲存至: {output_path}")
+    print(f"報告已儲存至: {output_path}")
     
     return output_path
 
