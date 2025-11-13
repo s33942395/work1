@@ -375,7 +375,11 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     """
     生成描述性統計 Word 報告
     參考原始 docx 格式，加入圖表、表格、統計檢定
+    返回 (doc, table_counter) 元組
     """
+    
+    # 初始化表格計數器
+    table_counter = {'count': 0}
     
     # 創建 Word 文件
     doc = Document()
@@ -644,7 +648,7 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
         ]
     }
     
-    add_statistics_table(doc, table_data, title='表 1：樣本結構分布表')
+    add_statistics_table(doc, table_data, title='樣本結構分布表', table_counter=table_counter)
     
     add_heading_with_style(doc, '三、樣本限制', level=2)
     add_heading_with_style(doc, '三、樣本限制', level=2)
@@ -739,9 +743,9 @@ def generate_descriptive_report_word(df, output_filename="問卷描述性統計�
     
     # === 議題分析 ===
     # 這裡需要根據實際欄位動態生成
-    # 先返回基礎文件結構
+    # 先返回基礎文件結構和表格計數器
     
-    return doc
+    return doc, table_counter
 
 def clean_and_merge_categories(series):
     """
@@ -809,7 +813,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
     
     if topic_col not in df.columns:
         doc.add_paragraph('本題目不存在於資料中。')
-        return doc
+        return
     
     # 清理資料並標準化類別
     if 'respondent_type' in df.columns:
@@ -825,7 +829,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
     
     if len(df_clean) == 0:
         doc.add_paragraph('本題目無有效樣本資料。')
-        return doc
+        return
     
     # 計算分佈
     if 'respondent_type' in df.columns:
@@ -1069,7 +1073,7 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                     f"整體分佈顯示前三名依序為：{top_3_desc}。"
                     f"此結果反映未上市櫃公司在本議題上的實際現況與主要實務做法。"
                 )
-            return doc
+            return
         
         # 計算各類別最高佔比
         if '公司方' in crosstab.columns and '投資方' in crosstab.columns:
