@@ -86,3 +86,5 @@ CSV 檔案應包含：
 
 如有問題請聯繫專案維護者。
 <!-- Trigger CI: updated by agent to run full non-DRY_RUN report generation -->
+
+<!-- CI trigger: minimal update to cause GitHub Actions to run full non-DRY_RUN report generation. Agent change on 2025-11-14 -->
