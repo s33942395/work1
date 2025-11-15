@@ -19,6 +19,10 @@ import warnings
 from difflib import SequenceMatcher
 warnings.filterwarnings('ignore')
 
+# 環境切換：若要做快速 dry-run（只印除錯訊息，不輸出圖檔或 Word），可設定環境變數 DRY_RUN=1
+import os as _os
+DRY_RUN = str(_os.environ.get('DRY_RUN', '')).lower() in ('1', 'true', 'yes')
+
 # 導入信度效度分析模組
 try:
     from reliability_validity_analysis import (
@@ -29,6 +33,58 @@ try:
 except:
     RELIABILITY_AVAILABLE = False
     print("警告：信度效度分析模組未載入")
+
+# 使用者要求：移除整個「四、問卷信度與效度分析」章節
+# 為確保輸出不包含該章節，強制關閉 RELIABILITY_AVAILABLE
+RELIABILITY_AVAILABLE = False
+
+
+def generate_plain_summary(topic_title, chi_result, crosstab_pct=None, role_cols=None):
+    """
+    產生白話模板（三種情況）：
+    - 顯著差異（p<0.05）: 模板 A
+    - 無顯著差異（p>=0.05）: 模板 B
+    - 無 respondent_type 欄位或資料不足: 模板 C
+    role_cols: tuple(company_col, investor_col)
+    """
+    # 模板預設值
+    if crosstab_pct is None or role_cols is None:
+        return "本題僅提供整體分布，無法進行公司方與投資方比較。"
+
+    company_col, investor_col = role_cols
+
+    try:
+        if chi_result and 'p_value' in chi_result and chi_result['p_value'] is not None:
+            p = chi_result['p_value']
+        else:
+            p = None
+    except Exception:
+        p = None
+
+    # 取得主要選項與百分比
+    try:
+        company_top = crosstab_pct[company_col].idxmax() if company_col in crosstab_pct.columns else ''
+        investor_top = crosstab_pct[investor_col].idxmax() if investor_col in crosstab_pct.columns else ''
+        company_top_pct = crosstab_pct.loc[company_top, company_col] if company_top in crosstab_pct.index and company_col in crosstab_pct.columns else 0
+        investor_top_pct = crosstab_pct.loc[investor_top, investor_col] if investor_top in crosstab_pct.index and investor_col in crosstab_pct.columns else 0
+    except Exception:
+        company_top = investor_top = ''
+        company_top_pct = investor_top_pct = 0
+
+    if p is None:
+        return f"本題資料不足以進行顯著性檢定。公司方最常選「{company_top}」（{company_top_pct:.1f}%），投資方最常選「{investor_top}」（{investor_top_pct:.1f}%）。"
+
+    if p < 0.05:
+        # 模板 A：顯著差異
+        return (f"本題在公司方與投資方間有顯著差異（p = {p:.4f}）。" 
+                f"公司方主要為「{company_top}」（{company_top_pct:.1f}%），" 
+                f"投資方主要為「{investor_top}」（{investor_top_pct:.1f}%）。建議針對此差異進行深入討論或設計後續訪談。")
+    else:
+        # 模板 B：無顯著差異
+        return (f"本題公司方最常選「{company_top}」（{company_top_pct:.1f}%），" 
+                f"投資方最常選「{investor_top}」（{investor_top_pct:.1f}%）。" 
+                f"統計檢定未達顯著（p = {p:.4f}），顯示雙方看法趨勢相近，可作為政策參考。")
+
 
 def smart_sort_categories(categories):
     """
@@ -80,27 +136,53 @@ def smart_sort_categories(categories):
         month_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*個?月', item_str)
         if month_match:
             return (3, 0, float(month_match.group(1)))
-        
-        # 5. 人數範圍
-        people_match = re.match(r'(\d+\.?\d*)\s*[-~到至]\s*(\d+\.?\d*)\s*人', item_str)
-        if people_match:
-            return (4, 0, float(people_match.group(1)))
-        
-        # 6. 頻率
-        freq_order = {'每週': 1, '每月': 2, '每季': 3, '每半年': 4, '每年': 5, '不定期': 6, '無': 7}
-        for key, value in freq_order.items():
-            if key in item_str:
-                return (5, 0, value)
-        
-        # 7. 李克特量表（Likert Scale）
-        likert_order = {
-            '非常不同意': 1, '不同意': 2, '普通': 3, '同意': 4, '非常同意': 5,
-            '非常不滿意': 1, '不滿意': 2, '普通': 3, '滿意': 4, '非常滿意': 5,
-            '非常不重要': 1, '不重要': 2, '普通': 3, '重要': 4, '非常重要': 5
-        }
-        for key, value in likert_order.items():
-            if item_str == key:
-                return (6, 0, value)
+            # 建立 exploded dataframe，逐一拆解複選選項並計數
+            rows = []
+            if 'respondent_type' in df.columns:
+                iter_df = df[[topic_col, 'respondent_type']].dropna(subset=[topic_col])
+            else:
+                iter_df = df[[topic_col]].dropna(subset=[topic_col])
+
+            for _, r in iter_df.iterrows():
+                respondent = r['respondent_type'] if 'respondent_type' in iter_df.columns else 'All'
+                opts = split_options(r[topic_col])
+                for opt in opts:
+                    rows.append({'option': opt, 'respondent_type': respondent})
+
+            if rows:
+                df_exploded = pd.DataFrame(rows)
+                crosstab = pd.crosstab(df_exploded['option'], df_exploded['respondent_type'], margins=True)
+                crosstab_pct = pd.crosstab(df_exploded['option'], df_exploded['respondent_type'], normalize='columns') * 100
+            else:
+                crosstab = pd.DataFrame()
+                crosstab_pct = pd.DataFrame()
+
+            # 生成表格資料
+            table_data = {
+                'columns': ['選項', '公司方人數', '公司方百分比', '投資方人數', '投資方百分比', '合計'],
+                'data': []
+            }
+
+            categories = [c for c in sorted_options if c]
+            for cat in categories:
+                company_count = crosstab.loc[cat, '公司方'] if ('公司方' in crosstab.columns and cat in crosstab.index) else 0
+                company_pct = f"{crosstab_pct.loc[cat, '公司方']:.1f}%" if ('公司方' in crosstab_pct.columns and cat in crosstab_pct.index) else '-'
+                investor_count = crosstab.loc[cat, '投資方'] if ('投資方' in crosstab.columns and cat in crosstab.index) else 0
+                investor_pct = f"{crosstab_pct.loc[cat, '投資方']:.1f}%" if ('投資方' in crosstab_pct.columns and cat in crosstab_pct.index) else '-'
+                total = crosstab.loc[cat, 'All'] if (cat in crosstab.index and 'All' in crosstab.columns) else (company_count + investor_count)
+                table_data['data'].append([str(cat), company_count, company_pct, investor_count, investor_pct, total])
+
+            # 合計行
+            company_total = crosstab.loc['All', '公司方'] if ('公司方' in crosstab.columns and 'All' in crosstab.index) else (crosstab['公司方'].sum() if '公司方' in crosstab.columns else 0)
+            investor_total = crosstab.loc['All', '投資方'] if ('投資方' in crosstab.columns and 'All' in crosstab.index) else (crosstab['投資方'].sum() if '投資方' in crosstab.columns else 0)
+            grand_total = crosstab.loc['All', 'All'] if ('All' in crosstab.index and 'All' in crosstab.columns) else (company_total + investor_total)
+            table_data['data'].append(['合計', company_total, '100.0%', investor_total, '100.0%', grand_total])
+
+            add_statistics_table(doc, table_data, title=f"{topic_title} - 受訪者類型分佈表", table_counter=table_counter)
+
+            # === 加入長條圖 ===
+            doc.add_paragraph()
+            doc.add_paragraph('【圖表呈現】', style='Heading 4')
         
         # 8. 階段
         if '第一階段' in item_str or '階段1' in item_str:
@@ -204,6 +286,10 @@ def add_statistics_table(doc, data_dict, title="", table_counter=None):
 def save_plotly_as_image(fig, filename):
     """儲存 Plotly 圖表為圖片（PNG格式）"""
     try:
+        if DRY_RUN:
+            # 在 dry-run 模式下，不實際寫檔，以加速測試並避免環境依賴
+            print(f"[DRY_RUN] skip saving plotly image to {filename}")
+            return True
         # 嘗試儲存圖表，設定較長的超時時間
         fig.write_image(filename, width=1000, height=600, scale=2, engine="kaleido")
         return True
@@ -929,6 +1015,27 @@ def find_matching_column(df, target_col):
     # 1. 直接存在且有資料
     if target_col in df.columns and df[target_col].dropna().shape[0] > 0:
         return target_col
+    # 快速處理：若題目包含「發展階段」等關鍵字，嘗試匹配任何包含該關鍵字的欄位
+    try:
+        if isinstance(target_col, str) and ("發展階段" in target_col or ("發展" in target_col and "階段" in target_col)):
+            for col in df.columns:
+                try:
+                    if isinstance(col, str) and ("發展" in col and "階段" in col) and df[col].dropna().shape[0] > 0:
+                        print(f"[find_matching_column] Matched phase question: '{target_col}' -> '{col}'")
+                        return col
+                except Exception:
+                    continue
+            # 進一步嘗試以欄位內容偵測階段標記（若欄位名稱未明確含關鍵字）
+            phase_value_markers = ['第一階段', '第二階段', '第三階段', '創立', '成長', '成熟']
+            for col in df.columns:
+                try:
+                    if df[col].dropna().astype(str).str.contains('|'.join(phase_value_markers)).any():
+                        print(f"[find_matching_column] Matched phase by values: '{target_col}' -> '{col}' (contains phase markers)")
+                        return col
+                except Exception:
+                    continue
+    except Exception:
+        pass
     # 2. mapping 對應且有資料
     if target_col in investor_mappings:
         mapped_col = investor_mappings[target_col]
@@ -1258,26 +1365,56 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
 
         # 收集所有選項
         all_options = set()
-        for v in df[topic_col].dropna():
-            all_options.update(split_options(v))
+        if topic_col in df.columns:
+            for v in df[topic_col].dropna():
+                all_options.update(split_options(v))
         sorted_options = smart_sort_categories(list(all_options))
 
-        # 分公司方/投資方計算（已移至下方 is_39_multi 處理區塊，這裡移除重複與錯誤嵌套）
-        
+        # 建立 exploded dataframe，逐一拆解複選選項並計數
+        rows = []
+        if topic_col in df.columns:
+            if 'respondent_type' in df.columns:
+                iter_df = df[[topic_col, 'respondent_type']].dropna(subset=[topic_col])
+            else:
+                iter_df = df[[topic_col]].dropna(subset=[topic_col])
+
+            for _, r in iter_df.iterrows():
+                respondent = r['respondent_type'] if 'respondent_type' in iter_df.columns else 'All'
+                opts = split_options(r[topic_col])
+                for opt in opts:
+                    rows.append({'option': opt, 'respondent_type': respondent})
+
+        if rows:
+            df_exploded = pd.DataFrame(rows)
+            crosstab = pd.crosstab(df_exploded['option'], df_exploded['respondent_type'], margins=True)
+            crosstab_pct = pd.crosstab(df_exploded['option'], df_exploded['respondent_type'], normalize='columns') * 100
+        else:
+            crosstab = pd.DataFrame()
+            crosstab_pct = pd.DataFrame()
+
+        # 生成表格資料
+        table_data = {
+            'columns': ['選項', '公司方人數', '公司方百分比', '投資方人數', '投資方百分比', '合計'],
+            'data': []
+        }
+
+        categories = [c for c in sorted_options if c]
+        for cat in categories:
+            company_count = crosstab.loc[cat, '公司方'] if ('公司方' in crosstab.columns and cat in crosstab.index) else 0
+            company_pct = f"{crosstab_pct.loc[cat, '公司方']:.1f}%" if ('公司方' in crosstab_pct.columns and cat in crosstab_pct.index) else '-'
+            investor_count = crosstab.loc[cat, '投資方'] if ('投資方' in crosstab.columns and cat in crosstab.index) else 0
+            investor_pct = f"{crosstab_pct.loc[cat, '投資方']:.1f}%" if ('投資方' in crosstab_pct.columns and cat in crosstab_pct.index) else '-'
+            total = crosstab.loc[cat, 'All'] if (cat in crosstab.index and 'All' in crosstab.columns) else (company_count + investor_count)
+            table_data['data'].append([str(cat), company_count, company_pct, investor_count, investor_pct, total])
+
         # 合計行
-        company_total = crosstab.loc['All', '公司方'] if '公司方' in crosstab.columns else 0
-        investor_total = crosstab.loc['All', '投資方'] if '投資方' in crosstab.columns else 0
-        table_data['data'].append([
-            '合計',
-            company_total,
-            '100.0%',
-            investor_total,
-            '100.0%',
-            crosstab.loc['All', 'All']
-        ])
-        
+        company_total = crosstab.loc['All', '公司方'] if ('公司方' in crosstab.columns and 'All' in crosstab.index) else (crosstab['公司方'].sum() if '公司方' in crosstab.columns else 0)
+        investor_total = crosstab.loc['All', '投資方'] if ('投資方' in crosstab.columns and 'All' in crosstab.index) else (crosstab['投資方'].sum() if '投資方' in crosstab.columns else 0)
+        grand_total = crosstab.loc['All', 'All'] if ('All' in crosstab.index and 'All' in crosstab.columns) else (company_total + investor_total)
+        table_data['data'].append(['合計', company_total, '100.0%', investor_total, '100.0%', grand_total])
+
         add_statistics_table(doc, table_data, title=f"{topic_title} - 受訪者類型分佈表", table_counter=table_counter)
-        
+
         # === 加入長條圖 ===
         doc.add_paragraph()
         doc.add_paragraph('【圖表呈現】', style='Heading 4')
@@ -1333,8 +1470,8 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
         doc.add_paragraph('【圖表呈現】', style='Heading 4')
         try:
             chart_title = f"{topic_title} - 公司方與投資方比較"
-            avg_label_length = sum(len(str(cat)) for cat in categories) / len(categories) if categories else 0
-            use_horizontal = avg_label_length > 15 or '議事內容' in topic_title
+            max_label_len = max((len(str(cat)) for cat in categories), default=0)
+            use_horizontal = (max_label_len > 12) or (len(categories) > 6)
             import plotly.graph_objects as go
             if use_horizontal:
                 fig = create_horizontal_bar_chart(crosstab, crosstab_pct, chart_title, categories)
@@ -1346,31 +1483,26 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                 last_paragraph = doc.paragraphs[-1]
                 last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 doc.add_paragraph()
+                # 只在檔案確實存在時才嘗試刪除，避免在 DRY_RUN 或儲存被跳過時出現錯誤訊息
                 try:
-                    os.remove(chart_filename)
-                except:
+                    if os.path.exists(chart_filename):
+                        os.remove(chart_filename)
+                except Exception:
                     pass
         except Exception as e:
             doc.add_paragraph(f'（圖表生成時發生錯誤）')
 
-        # 顯著性檢定與白話文
+        # 顯著性檢定與白話文（使用統一模板）
         chi_result = calculate_chi_square(df_clean, topic_col, 'respondent_type') if 'respondent_type' in df_clean.columns else None
-        if chi_result and chi_result['p_value'] < 0.05:
-            company_top = crosstab_pct['公司方'].idxmax() if '公司方' in crosstab_pct.columns else ''
-            investor_top = crosstab_pct['投資方'].idxmax() if '投資方' in crosstab_pct.columns else ''
-            company_top_pct = crosstab_pct.loc[company_top, '公司方'] if company_top else 0
-            investor_top_pct = crosstab_pct.loc[investor_top, '投資方'] if investor_top else 0
-            plain_text = f"本題在公司方與投資方之間有明顯差異（p = {chi_result['p_value']:.4f}）。公司方最常選「{company_top}」（{company_top_pct:.1f}%），投資方則以「{investor_top}」（{investor_top_pct:.1f}%）為主，顯示雙方在此議題上的看法或做法有顯著不同。建議針對此差異進行深入討論。"
+        try:
+            plain_text = generate_plain_summary(topic_title, chi_result, crosstab_pct=crosstab_pct, role_cols=('公司方', '投資方'))
             doc.add_paragraph(insert_stat_plain(plain_text))
-            if sig_topics is not None:
-                sig_topics.append(topic_title)
-        else:
-            company_top = crosstab_pct['公司方'].idxmax() if '公司方' in crosstab_pct.columns else ''
-            investor_top = crosstab_pct['投資方'].idxmax() if '投資方' in crosstab_pct.columns else ''
-            company_top_pct = crosstab_pct.loc[company_top, '公司方'] if company_top else 0
-            investor_top_pct = crosstab_pct.loc[investor_top, '投資方'] if investor_top else 0
-            plain_text = f"本題公司方最常選「{company_top}」（{company_top_pct:.1f}%），投資方最常選「{investor_top}」（{investor_top_pct:.1f}%）。雙方分布趨勢相近，統計檢定未達顯著差異。此結果可作為公司治理現況的參考。"
-            doc.add_paragraph(insert_stat_plain(plain_text))
+            if chi_result and 'p_value' in chi_result and chi_result['p_value'] is not None and chi_result['p_value'] < 0.05:
+                if sig_topics is not None:
+                    sig_topics.append(topic_title)
+        except Exception:
+            # 若模板產生失敗，後退為原本簡短句
+            doc.add_paragraph('本題產生白話摘要時發生問題。')
     else:
         df_clean = df[[topic_col]].copy()
         df_clean = df_clean.dropna(subset=[topic_col])
@@ -1407,8 +1539,8 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
             sorted_categories = smart_sort_categories(categories)
             sorted_percentages = [crosstab.loc[cat, '百分比'] for cat in sorted_categories]
             chart_title = f"{topic_title} - 整體分佈"
-            avg_label_length = sum(len(str(cat)) for cat in categories) / len(categories) if categories else 0
-            use_horizontal = avg_label_length > 15 or '議事內容' in topic_title
+            max_label_len = max((len(str(cat)) for cat in categories), default=0)
+            use_horizontal = (max_label_len > 12) or (len(categories) > 6)
             import plotly.graph_objects as go
             if use_horizontal:
                 fig = go.Figure(go.Bar(
@@ -1446,19 +1578,18 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                 last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 doc.add_paragraph()
                 try:
-                    os.remove(chart_filename)
-                except:
+                    if os.path.exists(chart_filename):
+                        os.remove(chart_filename)
+                except Exception:
                     pass
         except Exception as e:
             doc.add_paragraph(f'（圖表生成時發生錯誤）')
-        if chi_result and chi_result['p_value'] < 0.05:
-            plain_text = f"本題在公司方與投資方之間有明顯差異（p = {chi_result['p_value']:.4f}）。公司方最常選「{company_top}」（{company_top_pct:.1f}%），投資方則以「{investor_top}」（{investor_top_pct:.1f}%）為主，顯示雙方在此議題上的看法或做法有顯著不同。建議針對此差異進行深入討論。"
+        # 產生整體白話摘要（無 respondent_type 比較時使用整體模板）
+        try:
+            plain_text = generate_plain_summary(topic_title, None, crosstab_pct=None, role_cols=None)
             doc.add_paragraph(insert_stat_plain(plain_text))
-            if sig_topics is not None:
-                sig_topics.append(topic_title)
-        else:
-            plain_text = f"本題公司方最常選「{company_top}」（{company_top_pct:.1f}%），投資方最常選「{investor_top}」（{investor_top_pct:.1f}%）。雙方分布趨勢相近，統計檢定未達顯著差異。此結果可作為公司治理現況的參考。"
-            doc.add_paragraph(insert_stat_plain(plain_text))
+        except Exception:
+            doc.add_paragraph('本題產生白話摘要時發生問題。')
     
     # (二) 公司階段分析
     if 'phase' in df.columns and topic_col in df.columns:
@@ -1530,10 +1661,10 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                     # 創建階段比較長條圖 - 使用完整問卷題目
                     chart_title = full_question if full_question else f"{topic_title} - 公司發展階段比較"
                     
-                    # 檢查標籤長度，決定使用垂直或水平長條圖
-                    avg_label_length = sum(len(str(cat)) for cat in categories) / len(categories) if categories else 0
-                    use_horizontal = avg_label_length > 15 or '議事內容' in topic_title
-                    
+                    # 檢查標籤長度與選項數量，決定使用水平或垂直長條圖
+                    max_label_len = max((len(str(cat)) for cat in categories), default=0)
+                    use_horizontal = (max_label_len > 12) or (len(categories) > 6)
+
                     if use_horizontal:
                         fig = create_horizontal_phase_chart(phase_crosstab, phase_crosstab_pct, chart_title, categories, phases)
                     else:
@@ -1549,10 +1680,11 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                         last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         doc.add_paragraph()
                         
-                        # 清理臨時檔案
+                        # 清理臨時檔案（僅在存在時刪除）
                         try:
-                            os.remove(chart_filename)
-                        except:
+                            if os.path.exists(chart_filename):
+                                os.remove(chart_filename)
+                        except Exception:
                             pass
                     else:
                         doc.add_paragraph('（圖表生成失敗）')
@@ -1562,214 +1694,130 @@ def add_topic_analysis(doc, df, topic_col, topic_title, topic_description, full_
                 
                 # === 統計檢定：根據資料類型選擇適當方法 ===
                 doc.add_paragraph('【統計檢定】', style='Heading 4')
-                
                 try:
                     # 準備階段分組資料
                     phase_groups = [df_phase[df_phase['phase'] == p][topic_col].dropna() for p in phases]
                     valid_groups = [g for g in phase_groups if len(g) > 0]
-                    
+
                     if len(valid_groups) < 2:
                         raise ValueError("有效階段組別不足（需至少2組）")
-                    
+
                     # 判斷資料類型：嘗試轉換為數值
-                    is_numeric = False
                     numeric_groups = []
                     for g in valid_groups:
-                        try:
-                            numeric_g = pd.to_numeric(g, errors='coerce').dropna()
-                            if len(numeric_g) >= 3:  # 至少3個樣本
-                                numeric_groups.append(numeric_g)
-                        except:
-                            pass
-                    
-                    # 如果所有組別都能轉為數值且樣本數足夠，視為連續變數
-                    if len(numeric_groups) == len(valid_groups) and all(len(g) >= 3 for g in numeric_groups):
-                        is_numeric = True
-                    
+                        numeric_g = pd.to_numeric(g, errors='coerce').dropna()
+                        if len(numeric_g) >= 3:  # 至少3個樣本
+                            numeric_groups.append(numeric_g)
+
+                    is_numeric = (len(numeric_groups) == len(valid_groups) and all(len(g) >= 3 for g in numeric_groups))
+
                     if is_numeric:
-                        # === 連續變數：使用 Kruskal-Wallis H 檢定（無母數）===
+                        # 連續變數：使用 Kruskal-Wallis H 檢定（無母數）
                         H_stat, p_val = kruskal(*numeric_groups)
-                        
-                        significance = ''
+                        significance = 'n.s.'
                         if p_val < 0.001:
                             significance = '***（高度顯著）'
                         elif p_val < 0.01:
                             significance = '**（非常顯著）'
                         elif p_val < 0.05:
                             significance = '*（顯著）'
-                        else:
-                            significance = 'n.s.（無顯著差異）'
-                        
-                        doc.add_paragraph(f"檢定方法：Kruskal-Wallis H 檢定（無母數檢定，適用於連續變數）")
-                        doc.add_paragraph(f"H 統計量：{H_stat:.3f}")
-                        doc.add_paragraph(f"自由度：{len(numeric_groups) - 1}")
-                        doc.add_paragraph(f"顯著性水準：p = {p_val:.4f} {significance}")
-                        
-                        doc.add_paragraph()
-                        doc.add_paragraph('【統計解讀】', style='Heading 4')
-                        doc.add_paragraph(
-                            f"Kruskal-Wallis H 檢定用於比較三個或以上獨立組別的中位數是否存在差異，"
-                            f"不假設資料符合常態分佈，適用於順序資料或非常態分佈的連續資料。"
-                        )
-                        
+
+                        doc.add_paragraph(f"檢定方法：Kruskal-Wallis H 檢定（無母數檢定，適用於連續變數），H = {H_stat:.3f}, p = {p_val:.4f} {significance}")
                     else:
-                        # === 類別變數：使用卡方檢定 ===
-                        # 建立列聯表（不含邊際合計）
+                        # 類別變數：使用卡方檢定
                         phase_crosstab_test = pd.crosstab(df_phase[topic_col], df_phase['phase'])
-                        
-                        # 確保有足夠的期望次數
                         chi2, p_val, dof, expected = chi2_contingency(phase_crosstab_test)
-                        
-                        # 檢查期望次數是否足夠（至少80%的格子 > 5）
+
                         low_expected = (expected < 5).sum()
                         total_cells = expected.size
-                        low_expected_pct = (low_expected / total_cells) * 100
-                        
-                        significance = ''
+                        low_expected_pct = (low_expected / total_cells) * 100 if total_cells > 0 else 0
+
+                        significance = 'n.s.'
                         if p_val < 0.001:
                             significance = '***（高度顯著）'
                         elif p_val < 0.01:
                             significance = '**（非常顯著）'
                         elif p_val < 0.05:
                             significance = '*（顯著）'
-                        else:
-                            significance = 'n.s.（無顯著差異）'
-                        
-                        doc.add_paragraph(f"檢定方法：卡方獨立性檢定（Chi-square test of independence，適用於類別變數）")
-                        doc.add_paragraph(f"卡方統計量：χ² = {chi2:.3f}")
-                        doc.add_paragraph(f"自由度：df = {dof}")
-                        doc.add_paragraph(f"顯著性水準：p = {p_val:.4f} {significance}")
-                        
-                        # 警告：如果期望次數過低
+
+                        doc.add_paragraph(f"檢定方法：卡方獨立性檢定，χ² = {chi2:.3f}, df = {dof}, p = {p_val:.4f} {significance}")
                         if low_expected_pct > 20:
-                            doc.add_paragraph(f"註：本題有 {low_expected_pct:.1f}% 之儲存格期望次數小於 5，檢定結果之穩定性可能受影響，解讀時需審慎。")
-                        
-                        doc.add_paragraph()
-                        doc.add_paragraph('【統計解讀】', style='Heading 4')
-                        doc.add_paragraph(
-                            f"卡方檢定用於檢驗兩個類別變數之間是否存在關聯性。"
-                            f"在此分析中，檢驗「公司發展階段」與「{topic_title}」是否具有顯著關聯。"
-                            f"虛無假設（H₀）為兩變數獨立（無關聯），對立假設（H₁）為兩變數有關聯。"
-                        )
-                    
-                    # === 共同的階段差異分析 ===
+                            doc.add_paragraph(f"註：有 {low_expected_pct:.1f}% 之儲存格期望次數小於 5，檢定結果可塑性較低，解讀時請謹慎。")
+
+                    # 產生簡潔白話總結（以公司方樣本進行階段檢定判斷）
+                    try:
+                        if 'respondent_type' in df.columns and 'phase' in df.columns:
+                            df_company_phase = df[(df['respondent_type'] == '公司方') & df['phase'].notna()]
+                            n_company = len(df_company_phase)
+                            if n_company >= 34:
+                                df_for_test = df_company_phase.sample(n=34, random_state=0)
+                                note_n = 34
+                            else:
+                                df_for_test = df_company_phase
+                                note_n = n_company
+
+                            if len(df_for_test) > 0:
+                                phase_chi = calculate_chi_square(df_for_test, topic_col, 'phase')
+                                pval = phase_chi['p_value'] if phase_chi and 'p_value' in phase_chi else None
+                                if pval is not None and pval < 0.05:
+                                    doc.add_paragraph(f"按公司發展階段分組（公司方 n={note_n}），本題在不同階段間顯示出顯著差異（p = {pval:.4f}）。建議針對此議題進一步分析以了解差異來源。")
+                                elif pval is not None:
+                                    doc.add_paragraph(f"按公司發展階段分組（公司方 n={note_n}），統計檢定未達顯著（p = {pval:.4f}）。顯示不同階段之間分布趨勢相近。")
+                                else:
+                                    doc.add_paragraph(f"無法計算階段性檢定（公司方 n={note_n}），可能資料不足或格式不適用。")
+                            else:
+                                doc.add_paragraph("公司方階段資料不足，無法進行階段統計檢定。")
+                        else:
+                            doc.add_paragraph("資料中缺少 respondent_type 或 phase 欄位，無法進行階段分析。")
+                    except Exception as e:
+                        doc.add_paragraph(f"產生階段白話摘要時發生錯誤：{str(e)[:120]}")
+
+                    # 共同階段描述（以百分比表為基礎）
                     doc.add_paragraph()
-                    doc.add_paragraph('【階段差異分析】', style='Heading 4')
-                    
-                    if p_val < 0.05:
-                        doc.add_paragraph(
-                            f"統計檢定顯示不同發展階段的公司在「{topic_title}」存在顯著差異（p = {p_val:.4f}）。"
-                            f"此結果表明公司發展階段確實影響此議題的表現或認知。"
-                        )
-                        
-                        # 提供各階段的具體觀察
-                        doc.add_paragraph()
-                        doc.add_paragraph('各階段特徵：', style='List Bullet')
-                        
+                    doc.add_paragraph('【階段差異觀察】', style='Heading 4')
+                    # phase_crosstab_pct 可能在上方未建立（若為數值或類別流程不同），嘗試建立
+                    try:
+                        phase_crosstab_pct = pd.crosstab(df_phase[topic_col], df_phase['phase'], normalize='columns') * 100
+                    except Exception:
+                        phase_crosstab_pct = pd.DataFrame()
+
+                    if not phase_crosstab_pct.empty:
                         phase_analysis = {}
                         for phase in phases:
                             if phase in phase_crosstab_pct.columns:
                                 top_option = phase_crosstab_pct[phase].idxmax()
                                 top_pct = phase_crosstab_pct.loc[top_option, phase]
                                 phase_analysis[phase] = {'option': top_option, 'pct': top_pct}
-                                
                                 p_bullet = doc.add_paragraph(style='List Bullet 2')
                                 p_bullet.add_run(f"{phase}：").bold = True
                                 p_bullet.add_run(f"主要選擇「{top_option}」（{top_pct:.1f}%）")
-                        
-                        # 深度趨勢分析
-                        doc.add_paragraph()
-                        doc.add_paragraph('【趨勢觀察與政策意涵】', style='Heading 4')
-                        
-                        # 比較第一階段與第三階段的變化
-                        if '第一階段' in phase_analysis and '第三階段' in phase_analysis:
-                            stage1_option = phase_analysis['第一階段']['option']
-                            stage3_option = phase_analysis['第三階段']['option']
-                            
-                            if stage1_option == stage3_option:
-                                doc.add_paragraph(
-                                    f"從發展軌跡觀察，第一階段至第三階段的公司皆以「{stage1_option}」為主要選擇，"
-                                    f"顯示此治理實務在各發展階段均受重視。然而，各階段在選擇比例上仍存在差異，"
-                                    f"反映出隨著公司成熟度提升，治理機制的深化程度有所不同。"
-                                )
-                            else:
-                                doc.add_paragraph(
-                                    f"觀察公司發展軌跡，第一階段主要選擇「{stage1_option}」，"
-                                    f"至第三階段則轉向「{stage3_option}」，顯示公司治理實務隨發展階段而演進。"
-                                    f"此變化反映出企業在不同成長階段對治理機制有不同的需求與優先順序。"
-                                )
-                        
-                        # 政策建議
-                        doc.add_paragraph(
-                            f"建議針對不同階段公司的特性，提供差異化的治理建議或輔導措施："
-                        )
-                        
-                        policy_bullets = [
-                            "第一階段（種子輪至B輪）：著重基礎治理架構建立，協助新創企業理解治理重要性，建立基本的決策流程與資訊揭露機制",
-                            "第二階段（C輪至D輪）：強化內部控制與資訊透明度，輔導企業建立更完善的內部稽核制度、財務管理系統及股東溝通機制",
-                            "第三階段（擴展期至成熟期）：完善利害關係人溝通與永續治理，協助企業建立全面性治理框架，為未來可能的IPO或併購做準備"
-                        ]
-                        
-                        for policy in policy_bullets:
-                            p = doc.add_paragraph(style='List Bullet 2')
-                            p.add_run(policy)
-                    else:
-                        doc.add_paragraph(
-                            f"統計檢定顯示不同發展階段的公司在「{topic_title}」無顯著差異（p = {p_val:.4f}）。"
-                            f"此結果表明本議題可能是跨階段的共同關注點，不因公司發展階段而有明顯變化。"
-                        )
-                        
-                        # 即使不顯著，仍提供描述性觀察
-                        doc.add_paragraph()
-                        doc.add_paragraph('各階段分佈觀察：', style='List Bullet')
-                        
-                        phase_consistency = []
-                        for phase in phases:
-                            if phase in phase_crosstab_pct.columns:
-                                top_option = phase_crosstab_pct[phase].idxmax()
-                                top_pct = phase_crosstab_pct.loc[top_option, phase]
-                                phase_consistency.append(top_option)
-                                
-                                p_bullet = doc.add_paragraph(style='List Bullet 2')
-                                p_bullet.add_run(f"{phase}：").bold = True
-                                p_bullet.add_run(f"主要選擇「{top_option}」（{top_pct:.1f}%）")
-                        
-                        # 一致性分析
-                        doc.add_paragraph()
-                        doc.add_paragraph('【實務意涵】', style='Heading 4')
-                        
-                        if len(set(phase_consistency)) == 1:
-                            doc.add_paragraph(
-                                f"值得注意的是，雖然統計上未達顯著差異，但三個發展階段的公司均以「{phase_consistency[0]}」為主要選擇，"
-                                f"顯示此治理實務具有跨階段的一致性，是未上市櫃公司普遍認同的治理方式。"
-                                f"此共識可作為推動相關政策或建立治理標準的重要依據。"
-                            )
+
+                        if p_val < 0.05:
+                            doc.add_paragraph(f"統計檢定顯示不同發展階段的公司在「{topic_title}」存在顯著差異（p = {p_val:.4f}）。")
                         else:
-                            doc.add_paragraph(
-                                f"雖然統計上未達顯著差異，但各階段主要選擇略有不同，"
-                                f"建議持續觀察各階段公司的治理實踐，累積更多資料以深入了解階段性差異的細微變化。"
-                                f"此類描述性資訊仍具參考價值，可供業務推動時考量不同階段公司的特性。"
-                            )
-                        
+                            doc.add_paragraph(f"統計檢定未顯示顯著差異（p = {p_val:.4f}），但仍提供各階段的描述性觀察供參考。")
+                    else:
+                        doc.add_paragraph('本題目無有效的階段百分比資料以供比較。')
+
                 except Exception as e:
                     doc.add_paragraph(f"由於資料結構限制或樣本數不足，無法進行統計檢定。錯誤訊息：{str(e)}")
                     doc.add_paragraph()
                     doc.add_paragraph('【數據解讀】', style='Heading 4')
-                    
-                    # 從階段分佈進行數據解讀
+                    # 從階段分佈進行數據解讀（若可用）
                     phase_descriptions = []
-                    for phase in phases:
-                        if phase in phase_crosstab_pct.columns:
-                            top_option = phase_crosstab_pct[phase].idxmax()
-                            top_pct = phase_crosstab_pct.loc[top_option, phase]
-                            phase_descriptions.append(f"{phase}主要選擇「{top_option}」（{top_pct:.1f}%）")
-                    
+                    try:
+                        phase_crosstab_pct = pd.crosstab(df_phase[topic_col], df_phase['phase'], normalize='columns') * 100
+                        for phase in phases:
+                            if phase in phase_crosstab_pct.columns:
+                                top_option = phase_crosstab_pct[phase].idxmax()
+                                top_pct = phase_crosstab_pct.loc[top_option, phase]
+                                phase_descriptions.append(f"{phase}主要選擇「{top_option}」（{top_pct:.1f}%）")
+                    except Exception:
+                        pass
                     if phase_descriptions:
                         doc.add_paragraph(
                             f"從各發展階段的分佈來看，{topic_title}的表現呈現階段性差異。"
                             f"{'；'.join(phase_descriptions)}。"
-                            f"第一階段公司通常處於建立基礎治理架構的時期，第二階段公司著重於制度化與規範化，"
-                            f"第三階段公司則追求更高標準的治理品質。建議公司參考同階段的最佳實踐，循序漸進地提升治理水平。"
                         )
         else:
             doc.add_paragraph('本題目無有效的階段資料。')
@@ -2032,9 +2080,12 @@ def generate_full_descriptive_report(df, output_path="/workspaces/work1/問卷�
             doc.add_paragraph(f"[信度效度分析發生錯誤：{str(e)}]")
     
     # 儲存文件
-    doc.save(output_path)
-    print(f"報告已儲存至: {output_path}")
-    
+    if DRY_RUN:
+        print(f"[DRY_RUN] skip saving Word document to: {output_path}")
+    else:
+        doc.save(output_path)
+        print(f"報告已儲存至: {output_path}")
+
     return output_path
 
 
